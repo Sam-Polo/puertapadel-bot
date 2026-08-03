@@ -17,12 +17,10 @@ COPY alembic.ini .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
-# Бот не должен ходить под root: если его когда-нибудь скомпрометируют,
-# пусть у него будут права только на свой каталог с данными.
-RUN useradd --create-home --uid 1000 bot \
-    && mkdir -p /app/data \
-    && chown -R bot:bot /app
-USER bot
+# Работаем под root — один сервер, один бот, а каталог data монтируется
+# с хоста bind-mount'ом: под непривилегированным пользователем внутри
+# контейнера в него не записать без возни с chown на хосте.
+RUN mkdir -p /app/data
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["python", "-m", "app"]
