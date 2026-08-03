@@ -1,0 +1,8 @@
+aiogram==3.30.0
+SQLAlchemy[asyncio]==2.0.51
+aiosqlite==0.22.1
+alembic==1.18.5
+pydantic-settings==2.14.2
+# База часовых поясов: в slim-образах и на Windows системной нет,
+# а zoneinfo без неё падает на ZoneInfoNotFoundError.
+tzdata==2025.2

@@ -1,0 +1,18 @@
+services:
+  bot:
+    build: .
+    container_name: puertapadel-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Внутри контейнера БД всегда здесь — значение из .env перекрываем,
+      # чтобы локальный DB_PATH для разработки не ломал том.
+      DB_PATH: /app/data/bot.sqlite3
+    volumes:
+      # Единственное, что переживает пересборку образа.
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
