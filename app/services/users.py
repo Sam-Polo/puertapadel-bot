@@ -49,13 +49,13 @@ async def complete_registration(
     first_name: str,
     last_name: str,
     gender: str,
-    age: int,
+    level: float,
     agreement_accepted_at: dt.datetime,
 ) -> User:
     user.first_name = first_name
     user.last_name = last_name
     user.gender = gender  # type: ignore[assignment]
-    user.age = age
+    user.level = level
     user.agreement_accepted_at = agreement_accepted_at
     if user.registered_at is None:
         user.registered_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)

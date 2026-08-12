@@ -39,7 +39,7 @@ def parse_date(raw: str) -> dt.date | None:
     """«19.04.2025», «19.04», «19/4/25» -> date. None, если не разобрали.
 
     Год можно не указывать: подставляем текущий, а если такая дата уже
-    прошла — следующий (админ заводит турниры вперёд, не назад).
+    прошла — следующий (админ заводит мероприятия вперёд, не назад).
     """
     match = _DATE_RE.match(raw.strip())
     if not match:
@@ -90,6 +90,6 @@ def fmt_date_short(value: dt.date) -> str:
 
 
 def title_prefix(date: dt.date, time_start: dt.time) -> str:
-    """Служебный префикс названия турнира: «(СБ1100) 1904»."""
+    """Служебный префикс названия мероприятия: «(СБ1100) 1904»."""
     weekday = WEEKDAY_SHORT[date.weekday()]
     return f"({weekday}{time_start.strftime('%H%M')}) {date.strftime('%d%m')}"

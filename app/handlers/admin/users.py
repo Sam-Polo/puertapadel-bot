@@ -15,7 +15,7 @@ from app.keyboards.admin import admin_user_kb, admin_users_kb, back_to_admin_kb
 from app.keyboards.callbacks import AdminCB
 from app.services import users as users_service
 from app.utils.dates import fmt_date
-from app.utils.formatting import q
+from app.utils.formatting import fmt_level, q
 from app.utils.tg import edit_or_send
 
 logger = logging.getLogger(__name__)
@@ -67,11 +67,11 @@ async def show_user(
             tg=tg,
             id=target.id,
             gender=texts.GENDER_LABEL.get(str(target.gender), "—"),
-            age=target.age or "—",
+            level=fmt_level(target.level),
             registered_at=(
                 fmt_date(target.registered_at.date()) if target.registered_at else "—"
             ),
-            tournaments=count,
+            events=count,
         )
         + ("\n\n🔒 <b>Заблокирован</b>" if target.is_blocked else ""),
         admin_user_kb(target, page=page),

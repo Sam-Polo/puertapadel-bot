@@ -6,35 +6,46 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.config import get_settings
-from app.db.models import Tournament, TournamentStatus, User
+from app.db.models import Event, EventStatus, User
 from app.keyboards.callbacks import AdminCB
-from app.utils.formatting import tournament_button_label
+from app.utils.formatting import event_button_label
 
 MAX_PLAYERS_PRESETS = (4, 8, 12, 16)
+
+_ABORT = InlineKeyboardButton(
+    text="✖️ Отменить создание", callback_data=AdminCB(action="abort").pack()
+)
+_SKIP = InlineKeyboardButton(
+    text="⏭ Пропустить", callback_data=AdminCB(action="skip").pack()
+)
 
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Создать турнир", callback_data=AdminCB(action="new"))
-    builder.button(text="📋 Турниры", callback_data=AdminCB(action="tours"))
+    builder.button(text="➕ Создать мероприятие", callback_data=AdminCB(action="new"))
+    builder.button(text="📋 Мероприятия", callback_data=AdminCB(action="tours"))
     builder.button(text="👥 Пользователи", callback_data=AdminCB(action="users"))
     builder.adjust(1)
     return builder.as_markup()
 
 
 def abort_kb() -> InlineKeyboardMarkup:
-    """Кнопка выхода из воронки создания турнира."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✖️ Отменить создание", callback_data=AdminCB(action="abort"))
-    return builder.as_markup()
+    """Обязательный шаг: выйти можно, пропустить — нет."""
+    return InlineKeyboardMarkup(inline_keyboard=[[_ABORT]])
+
+
+def skip_kb() -> InlineKeyboardMarkup:
+    """Необязательный шаг."""
+    return InlineKeyboardMarkup(inline_keyboard=[[_SKIP], [_ABORT]])
 
 
 def title_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✏️ Ввести название целиком", callback_data=AdminCB(action="title_full"))
-    builder.button(text="✖️ Отменить создание", callback_data=AdminCB(action="abort"))
     builder.adjust(1)
-    return builder.as_markup()
+    markup = builder.as_markup()
+    markup.inline_keyboard.append([_ABORT])
+    return markup
 
 
 def locations_kb(recent: list[str]) -> InlineKeyboardMarkup:
@@ -47,11 +58,8 @@ def locations_kb(recent: list[str]) -> InlineKeyboardMarkup:
                 callback_data=AdminCB(action="loc", value=str(index)).pack(),
             )
         )
-    builder.row(
-        InlineKeyboardButton(
-            text="✖️ Отменить создание", callback_data=AdminCB(action="abort").pack()
-        )
-    )
+    builder.row(_SKIP)
+    builder.row(_ABORT)
     return builder.as_markup()
 
 
@@ -60,20 +68,10 @@ def max_players_kb() -> InlineKeyboardMarkup:
     for value in MAX_PLAYERS_PRESETS:
         builder.button(text=str(value), callback_data=AdminCB(action="max", value=str(value)))
     builder.adjust(len(MAX_PLAYERS_PRESETS))
-    builder.row(
-        InlineKeyboardButton(
-            text="✖️ Отменить создание", callback_data=AdminCB(action="abort").pack()
-        )
-    )
-    return builder.as_markup()
-
-
-def rating_kb() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Без ограничений", callback_data=AdminCB(action="rating", value="any"))
-    builder.button(text="✖️ Отменить создание", callback_data=AdminCB(action="abort"))
-    builder.adjust(1)
-    return builder.as_markup()
+    markup = builder.as_markup()
+    markup.inline_keyboard.append([_SKIP])
+    markup.inline_keyboard.append([_ABORT])
+    return markup
 
 
 def yes_no_kb(action: str) -> InlineKeyboardMarkup:
@@ -81,33 +79,31 @@ def yes_no_kb(action: str) -> InlineKeyboardMarkup:
     builder.button(text="✅ Да", callback_data=AdminCB(action=action, value="1"))
     builder.button(text="❌ Нет", callback_data=AdminCB(action=action, value="0"))
     builder.adjust(2)
-    builder.row(
-        InlineKeyboardButton(
-            text="✖️ Отменить создание", callback_data=AdminCB(action="abort").pack()
-        )
-    )
-    return builder.as_markup()
+    markup = builder.as_markup()
+    markup.inline_keyboard.append([_SKIP])
+    markup.inline_keyboard.append([_ABORT])
+    return markup
 
 
 def price_kb() -> InlineKeyboardMarkup:
+    """«Бесплатно» и «пропустить» — разные вещи: 0 ₽ против «не указано»."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="Бесплатно", callback_data=AdminCB(action="price", value="0"))
-    builder.button(text="✖️ Отменить создание", callback_data=AdminCB(action="abort"))
+    builder.button(text="🆓 Бесплатно", callback_data=AdminCB(action="price", value="0"))
     builder.adjust(1)
-    return builder.as_markup()
+    markup = builder.as_markup()
+    markup.inline_keyboard.append([_SKIP])
+    markup.inline_keyboard.append([_ABORT])
+    return markup
 
 
 def visibility_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Видна всем", callback_data=AdminCB(action="vis", value="1"))
-    builder.button(text="🙈 Скрытая", callback_data=AdminCB(action="vis", value="0"))
+    builder.button(text="✅ Видно всем", callback_data=AdminCB(action="vis", value="1"))
+    builder.button(text="🙈 Скрытое", callback_data=AdminCB(action="vis", value="0"))
     builder.adjust(1)
-    builder.row(
-        InlineKeyboardButton(
-            text="✖️ Отменить создание", callback_data=AdminCB(action="abort").pack()
-        )
-    )
-    return builder.as_markup()
+    markup = builder.as_markup()
+    markup.inline_keyboard.append([_ABORT])
+    return markup
 
 
 def preview_kb() -> InlineKeyboardMarkup:
@@ -119,35 +115,31 @@ def preview_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def admin_tournaments_kb(
-    tournaments: list[Tournament],
+def admin_events_kb(
+    events: list[Event],
     *,
     page: int,
     total_pages: int,
     counters: dict[int, int],
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for t in tournaments:
+    for event in events:
         builder.row(
             InlineKeyboardButton(
-                text=tournament_button_label(t, taken=counters.get(t.id, 0)),
-                callback_data=AdminCB(action="tour", id=t.id, page=page).pack(),
+                text=event_button_label(event, taken=counters.get(event.id, 0)),
+                callback_data=AdminCB(action="tour", id=event.id, page=page).pack(),
             )
         )
     if total_pages > 1:
         builder.row(
             InlineKeyboardButton(
                 text="◀️",
-                callback_data=AdminCB(
-                    action="tours", page=(page - 1) % total_pages
-                ).pack(),
+                callback_data=AdminCB(action="tours", page=(page - 1) % total_pages).pack(),
             ),
             InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"),
             InlineKeyboardButton(
                 text="▶️",
-                callback_data=AdminCB(
-                    action="tours", page=(page + 1) % total_pages
-                ).pack(),
+                callback_data=AdminCB(action="tours", page=(page + 1) % total_pages).pack(),
             ),
         )
     builder.row(
@@ -157,48 +149,54 @@ def admin_tournaments_kb(
     return builder.as_markup()
 
 
-def admin_tournament_kb(t: Tournament, *, page: int) -> InlineKeyboardMarkup:
+def admin_event_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
     settings = get_settings()
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
             text="👥 Состав",
-            callback_data=AdminCB(action="players", id=t.id, page=page).pack(),
+            callback_data=AdminCB(action="players", id=event.id, page=page).pack(),
         )
     )
 
-    if t.status is TournamentStatus.DRAFT:
+    if event.status is EventStatus.DRAFT:
         builder.row(
             InlineKeyboardButton(
                 text="📢 Опубликовать",
-                callback_data=AdminCB(action="publish_existing", id=t.id, page=page).pack(),
+                callback_data=AdminCB(
+                    action="publish_existing", id=event.id, page=page
+                ).pack(),
             )
         )
-    elif t.status is TournamentStatus.OPEN:
+    elif event.status is EventStatus.OPEN:
         builder.row(
             InlineKeyboardButton(
                 text="🔴 Закрыть набор",
-                callback_data=AdminCB(action="status", id=t.id, page=page, value="closed").pack(),
+                callback_data=AdminCB(
+                    action="status", id=event.id, page=page, value="closed"
+                ).pack(),
             )
         )
-    elif t.status is TournamentStatus.CLOSED:
+    elif event.status is EventStatus.CLOSED:
         builder.row(
             InlineKeyboardButton(
                 text="🟢 Открыть набор",
-                callback_data=AdminCB(action="status", id=t.id, page=page, value="open").pack(),
+                callback_data=AdminCB(
+                    action="status", id=event.id, page=page, value="open"
+                ).pack(),
             )
         )
 
-    if t.status is not TournamentStatus.CANCELLED:
+    if event.status is not EventStatus.CANCELLED:
         builder.row(
             InlineKeyboardButton(
-                text="🚫 Отменить турнир",
-                callback_data=AdminCB(action="cancel", id=t.id, page=page).pack(),
+                text="🚫 Отменить мероприятие",
+                callback_data=AdminCB(action="cancel", id=event.id, page=page).pack(),
             )
         )
 
     builder.row(
-        InlineKeyboardButton(text="🔗 Ссылка на запись", url=settings.deep_link(t.id))
+        InlineKeyboardButton(text="🔗 Ссылка на запись", url=settings.deep_link(event.id))
     )
     builder.row(
         InlineKeyboardButton(
@@ -209,12 +207,12 @@ def admin_tournament_kb(t: Tournament, *, page: int) -> InlineKeyboardMarkup:
 
 
 def admin_participants_kb(
-    t: Tournament,
+    event: Event,
     participants: list[tuple[User, bool]],
     *,
     page: int,
 ) -> InlineKeyboardMarkup:
-    """Кнопка на каждого игрока — переключает отметку об оплате."""
+    """Кнопка на каждого участника — переключает отметку об оплате."""
     builder = InlineKeyboardBuilder()
     for index, (user, is_paid) in enumerate(participants, start=1):
         mark = "💰" if is_paid else "⏳"
@@ -222,20 +220,20 @@ def admin_participants_kb(
             InlineKeyboardButton(
                 text=f"{mark} {index}. {user.full_name}",
                 callback_data=AdminCB(
-                    action="paid", id=t.id, page=page, value=str(user.id)
+                    action="paid", id=event.id, page=page, value=str(user.id)
                 ).pack(),
             ),
             InlineKeyboardButton(
                 text="🗑",
                 callback_data=AdminCB(
-                    action="kick", id=t.id, page=page, value=str(user.id)
+                    action="kick", id=event.id, page=page, value=str(user.id)
                 ).pack(),
             ),
         )
     builder.row(
         InlineKeyboardButton(
-            text="⬅️ К турниру",
-            callback_data=AdminCB(action="tour", id=t.id, page=page).pack(),
+            text="⬅️ К мероприятию",
+            callback_data=AdminCB(action="tour", id=event.id, page=page).pack(),
         )
     )
     return builder.as_markup()
@@ -288,15 +286,15 @@ def admin_user_kb(user: User, *, page: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def confirm_cancel_tournament_kb(t: Tournament, *, page: int) -> InlineKeyboardMarkup:
+def confirm_cancel_event_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🚫 Да, отменить турнир",
-        callback_data=AdminCB(action="cancel_ok", id=t.id, page=page),
+        text="🚫 Да, отменить мероприятие",
+        callback_data=AdminCB(action="cancel_ok", id=event.id, page=page),
     )
     builder.button(
         text="⬅️ Не отменять",
-        callback_data=AdminCB(action="tour", id=t.id, page=page),
+        callback_data=AdminCB(action="tour", id=event.id, page=page),
     )
     builder.adjust(1)
     return builder.as_markup()

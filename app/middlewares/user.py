@@ -68,7 +68,7 @@ class RegistrationGateMiddleware(BaseMiddleware):
         if user is None or user.is_registered:
             return await handler(event, data)
 
-        # Админу регистрация не нужна: он управляет турнирами, а не играет.
+        # Админу регистрация не нужна: он управляет мероприятиями, а не играет.
         # Если захочет записаться — воронку предложит сам хендлер записи.
         if get_settings().is_admin(user.id):
             return await handler(event, data)
@@ -109,7 +109,7 @@ class RegistrationGateMiddleware(BaseMiddleware):
             text = (event.text or "").strip()
             if text.startswith(_ALLOWED_COMMANDS):
                 return True
-            # Текстовые шаги воронки: имя, фамилия, возраст.
+            # Текстовые шаги воронки: имя, фамилия, уровень.
             state: FSMContext | None = data.get("state")
             if state is None:
                 return False

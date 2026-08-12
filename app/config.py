@@ -45,7 +45,7 @@ class Settings(BaseSettings):
         if not parsed:
             raise ValueError(
                 "ADMIN_IDS пуст: укажите хотя бы один Telegram ID, иначе "
-                "управлять турнирами будет некому"
+                "управлять мероприятиями будет некому"
             )
         return value
 
@@ -85,8 +85,8 @@ class Settings(BaseSettings):
     def announces_enabled(self) -> bool:
         return self.announce_chat_id is not None
 
-    def deep_link(self, tournament_id: int) -> str:
-        return f"https://t.me/{self.bot_username}?start=t{tournament_id}"
+    def deep_link(self, event_id: int) -> str:
+        return f"https://t.me/{self.bot_username}?start=t{event_id}"
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids

@@ -6,9 +6,9 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.config import get_settings
-from app.db.models import Registration, Tournament, TournamentStatus
-from app.keyboards.callbacks import MenuCB, PageCB, RegCB, TourCB
-from app.utils.formatting import tournament_button_label
+from app.db.models import Event, EventStatus, Registration
+from app.keyboards.callbacks import EventCB, MenuCB, PageCB, RegCB
+from app.utils.formatting import event_button_label
 
 PAGE_SIZE = 6
 
@@ -47,8 +47,8 @@ def registration_confirm_kb() -> InlineKeyboardMarkup:
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🎾 Турниры", callback_data=MenuCB(action="tournaments"))
-    builder.button(text="📋 Мои турниры", callback_data=MenuCB(action="my"))
+    builder.button(text="🎾 Мероприятия", callback_data=MenuCB(action="events"))
+    builder.button(text="📋 Мои записи", callback_data=MenuCB(action="my"))
     builder.button(text="👤 Профиль", callback_data=MenuCB(action="profile"))
     builder.adjust(2, 1)
     return builder.as_markup()
@@ -63,7 +63,7 @@ def back_to_menu_kb() -> InlineKeyboardMarkup:
 def _pagination_row(scope: str, page: int, total_pages: int) -> list[InlineKeyboardButton]:
     if total_pages <= 1:
         return []
-    row = [
+    return [
         InlineKeyboardButton(
             text="◀️",
             callback_data=PageCB(scope=scope, page=(page - 1) % total_pages).pack(),
@@ -74,11 +74,10 @@ def _pagination_row(scope: str, page: int, total_pages: int) -> list[InlineKeybo
             callback_data=PageCB(scope=scope, page=(page + 1) % total_pages).pack(),
         ),
     ]
-    return row
 
 
-def tournaments_list_kb(
-    tournaments: list[Tournament],
+def events_list_kb(
+    events: list[Event],
     *,
     page: int,
     total_pages: int,
@@ -87,12 +86,14 @@ def tournaments_list_kb(
     counters: dict[int, int] | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for t in tournaments:
-        taken = counters.get(t.id) if counters else None
+    for event in events:
+        taken = counters.get(event.id) if counters else None
         builder.row(
             InlineKeyboardButton(
-                text=tournament_button_label(t, taken=taken),
-                callback_data=TourCB(action="view", id=t.id, page=page, src=src).pack(),
+                text=event_button_label(event, taken=taken),
+                callback_data=EventCB(
+                    action="view", id=event.id, page=page, src=src
+                ).pack(),
             )
         )
     row = _pagination_row(scope, page, total_pages)
@@ -104,8 +105,8 @@ def tournaments_list_kb(
     return builder.as_markup()
 
 
-def tournament_card_kb(
-    t: Tournament,
+def event_card_kb(
+    event: Event,
     *,
     my_registration: Registration | None,
     page: int,
@@ -115,46 +116,88 @@ def tournament_card_kb(
     builder = InlineKeyboardBuilder()
 
     if my_registration is not None:
-        if t.status is not TournamentStatus.CANCELLED:
+        if event.status is not EventStatus.CANCELLED:
             builder.button(
                 text="❌ Отменить запись",
-                callback_data=TourCB(action="cancel", id=t.id, page=page, src=src),
+                callback_data=EventCB(action="cancel", id=event.id, page=page, src=src),
             )
-    elif t.accepts_signups and not is_full:
+    elif event.accepts_signups and not is_full:
         builder.button(
             text="✅ Записаться",
-            callback_data=TourCB(action="signup", id=t.id, page=page, src=src),
+            callback_data=EventCB(action="signup", id=event.id, page=page, src=src),
         )
 
-    back_action = "my" if src == "my" else "tournaments"
+    back_action = "my" if src == "my" else "events"
     builder.button(text="⬅️ Назад", callback_data=MenuCB(action=back_action))
     builder.adjust(1)
     return builder.as_markup()
 
 
-def signup_confirm_kb(t: Tournament, *, page: int, src: str) -> InlineKeyboardMarkup:
+def seats_choice_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup:
+    """Первый шаг записи: за себя или ещё за одного человека."""
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="✅ Подтвердить запись",
-        callback_data=TourCB(action="signup_ok", id=t.id, page=page, src=src),
+        text="👤 Только за себя",
+        callback_data=EventCB(
+            action="seats", id=event.id, page=page, src=src, value="1"
+        ),
+    )
+    builder.button(
+        text="👥 За себя и ещё одного",
+        callback_data=EventCB(
+            action="seats", id=event.id, page=page, src=src, value="2"
+        ),
     )
     builder.button(
         text="⬅️ Назад",
-        callback_data=TourCB(action="view", id=t.id, page=page, src=src),
+        callback_data=EventCB(action="view", id=event.id, page=page, src=src),
     )
     builder.adjust(1)
     return builder.as_markup()
 
 
-def cancel_confirm_kb(t: Tournament, *, page: int, src: str) -> InlineKeyboardMarkup:
+def signup_confirm_kb(event: Event, *, page: int, src: str, seats: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Подтвердить запись",
+        callback_data=EventCB(
+            action="signup_ok", id=event.id, page=page, src=src, value=str(seats)
+        ),
+    )
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=EventCB(action="signup", id=event.id, page=page, src=src),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def only_myself_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup:
+    """Мест на двоих не хватило — предлагаем записаться одному."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="👤 Записаться только за себя",
+        callback_data=EventCB(
+            action="seats", id=event.id, page=page, src=src, value="1"
+        ),
+    )
+    builder.button(
+        text="⬅️ Назад",
+        callback_data=EventCB(action="view", id=event.id, page=page, src=src),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def cancel_confirm_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text="❌ Да, отменить запись",
-        callback_data=TourCB(action="cancel_ok", id=t.id, page=page, src=src),
+        callback_data=EventCB(action="cancel_ok", id=event.id, page=page, src=src),
     )
     builder.button(
         text="⬅️ Оставить запись",
-        callback_data=TourCB(action="view", id=t.id, page=page, src=src),
+        callback_data=EventCB(action="view", id=event.id, page=page, src=src),
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -170,7 +213,7 @@ def profile_kb() -> InlineKeyboardMarkup:
 
 def after_signup_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="📋 Мои турниры", callback_data=MenuCB(action="my"))
-    builder.button(text="🎾 Другие турниры", callback_data=MenuCB(action="tournaments"))
+    builder.button(text="📋 Мои записи", callback_data=MenuCB(action="my"))
+    builder.button(text="🎾 Другие мероприятия", callback_data=MenuCB(action="events"))
     builder.adjust(1)
     return builder.as_markup()

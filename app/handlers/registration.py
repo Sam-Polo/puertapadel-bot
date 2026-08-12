@@ -1,6 +1,6 @@
-"""Воронка регистрации игрока.
+"""Воронка регистрации участника.
 
-Порядок: согласие → имя → фамилия → пол → возраст → подтверждение.
+Порядок: согласие → имя → фамилия → пол → уровень → подтверждение.
 Согласие спрашиваем первым: до него бот персональных данных не собирает.
 """
 
@@ -28,7 +28,7 @@ from app.keyboards.common import (
 )
 from app.services import users as users_service
 from app.states import RegistrationSG
-from app.utils.formatting import q
+from app.utils.formatting import fmt_level, parse_level, q
 from app.utils.tg import edit_or_send
 
 logger = logging.getLogger(__name__)
@@ -38,24 +38,21 @@ router = Router(name="registration")
 # Буквы (в том числе с дефисом и апострофом), 2-30 символов.
 NAME_RE = re.compile(r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё\-' ]{1,29}$")
 
-MIN_AGE = 6
-MAX_AGE = 100
-
-# Ключ в FSM, где ждёт турнир, на который человек шёл по ссылке из анонса.
-PENDING_TOURNAMENT = "pending_tournament"
+# Ключ в FSM, где ждёт мероприятие, на которое человек шёл по ссылке из анонса.
+PENDING_EVENT = "pending_event"
 
 
 async def start_registration(message: Message, state: FSMContext) -> None:
     """Показывает согласие и переводит в первое состояние воронки.
 
-    Данные FSM чистим, но турнир из deep-link'а сохраняем: пользователь
+    Данные FSM чистим, но мероприятие из deep-link'а сохраняем: человек
     пришёл записываться, и после регистрации мы обязаны его туда вернуть.
     """
     data = await state.get_data()
-    pending = data.get(PENDING_TOURNAMENT)
+    pending = data.get(PENDING_EVENT)
     await state.clear()
     if pending is not None:
-        await state.update_data({PENDING_TOURNAMENT: pending})
+        await state.update_data({PENDING_EVENT: pending})
 
     await state.set_state(RegistrationSG.agreement)
     await message.answer(
@@ -68,19 +65,19 @@ async def start_registration(message: Message, state: FSMContext) -> None:
 async def finish_registration(
     message: Message, state: FSMContext, session: AsyncSession, user: User
 ) -> None:
-    """Завершает регистрацию и ведёт дальше: к турниру из ссылки или в меню."""
+    """Завершает регистрацию и ведёт дальше: к мероприятию из ссылки или в меню."""
     data = await state.get_data()
-    pending = data.get(PENDING_TOURNAMENT)
+    pending = data.get(PENDING_EVENT)
     await state.clear()
 
     await message.answer(texts.REGISTRATION_DONE)
 
     if pending is not None:
-        # Импорт здесь: tournaments импортирует клавиатуры, а не нас — но
+        # Импорт здесь: events импортирует клавиатуры, а не нас — но
         # держим связь односторонней и в рантайме.
-        from app.handlers.tournaments import send_tournament_card
+        from app.handlers.events import send_event_card
 
-        await send_tournament_card(message, session, user, int(pending), src="link")
+        await send_event_card(message, session, user, int(pending), src="link")
         return
 
     await message.answer(texts.MAIN_MENU, reply_markup=main_menu_kb())
@@ -148,18 +145,18 @@ async def on_gender(
 ) -> None:
     await callback.answer()
     await state.update_data(gender=callback_data.value)
-    await state.set_state(RegistrationSG.age)
-    await edit_or_send(callback, texts.ASK_AGE)
+    await state.set_state(RegistrationSG.level)
+    await edit_or_send(callback, texts.ASK_LEVEL)
 
 
-@router.message(RegistrationSG.age, F.text)
-async def on_age(message: Message, state: FSMContext) -> None:
-    raw = (message.text or "").strip()
-    if not raw.isdigit() or not (MIN_AGE <= int(raw) <= MAX_AGE):
-        await message.answer(texts.BAD_AGE)
+@router.message(RegistrationSG.level, F.text)
+async def on_level(message: Message, state: FSMContext) -> None:
+    level = parse_level(message.text or "")
+    if level is None:
+        await message.answer(texts.BAD_LEVEL)
         return
 
-    await state.update_data(age=int(raw))
+    await state.update_data(level=level)
     data = await state.get_data()
     await state.set_state(RegistrationSG.confirm)
     await message.answer(
@@ -167,7 +164,7 @@ async def on_age(message: Message, state: FSMContext) -> None:
             first_name=q(data["first_name"]),
             last_name=q(data["last_name"]),
             gender=texts.GENDER_LABEL[data["gender"]],
-            age=data["age"],
+            level=fmt_level(data["level"]),
         ),
         reply_markup=registration_confirm_kb(),
     )
@@ -193,7 +190,7 @@ async def on_confirm(
         first_name=data["first_name"],
         last_name=data["last_name"],
         gender=data["gender"],
-        age=data["age"],
+        level=data["level"],
         agreement_accepted_at=accepted_at,
     )
     logger.info("Пользователь %s завершил регистрацию", user.id)
@@ -205,7 +202,7 @@ async def on_confirm(
 
 @router.message(RegistrationSG.first_name)
 @router.message(RegistrationSG.last_name)
-@router.message(RegistrationSG.age)
+@router.message(RegistrationSG.level)
 async def on_wrong_content(message: Message) -> None:
     """Стикер/фото/голосовое вместо ответа — переспрашиваем, состояние не теряем."""
     await message.answer(texts.REGISTRATION_IN_PROGRESS)

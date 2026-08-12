@@ -1,4 +1,4 @@
-"""FSM-состояния: воронка регистрации игрока и воронка создания турнира."""
+"""FSM-состояния: воронка регистрации участника и воронка создания мероприятия."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ class RegistrationSG(StatesGroup):
     first_name = State()
     last_name = State()
     gender = State()
-    age = State()
+    level = State()
     confirm = State()
 
 
-class NewTournamentSG(StatesGroup):
+class NewEventSG(StatesGroup):
     date = State()
     time_start = State()
     time_end = State()
@@ -25,16 +25,17 @@ class NewTournamentSG(StatesGroup):
     is_rated = State()
     price = State()
     visibility = State()
+    description = State()
     preview = State()
+
+
+class SignupSG(StatesGroup):
+    """Запись за двоих: ждём имя напарника."""
+
+    partner_name = State()
 
 
 class EditProfileSG(StatesGroup):
     """Правка отдельного поля профиля — какое именно, лежит в data['field']."""
 
     value = State()
-
-
-class AdminNoteSG(StatesGroup):
-    """Заметка админа об игроке."""
-
-    text = State()

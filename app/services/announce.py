@@ -1,8 +1,9 @@
 """Публикация анонсов в чат клуба и рассылка уведомлений.
 
-Анонс отправляется один раз при публикации турнира. Дальше он не трогается —
-состав в чате не показываем, — но при смене статуса (набор закрыт, турнир
-отменён) сообщение перерисовывается, чтобы в чате не висела неправда.
+Анонс отправляется один раз при публикации мероприятия. Дальше он не
+трогается — состав в чате не показываем, — но при смене статуса (набор
+закрыт, мероприятие отменено) сообщение перерисовывается, чтобы в чате не
+висела неправда.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db.models import Tournament
+from app.db.models import Event
 from app.utils.formatting import render_announcement
 
 logger = logging.getLogger(__name__)
@@ -25,52 +26,52 @@ class AnnounceError(Exception):
     """Анонс отправить не удалось — текст исключения показываем админу."""
 
 
-async def publish(bot: Bot, session: AsyncSession, tournament: Tournament) -> bool:
+async def publish(bot: Bot, session: AsyncSession, event: Event) -> bool:
     """Публикует анонс. False — если публиковать нечего или незачем."""
     settings = get_settings()
     if not settings.announces_enabled:
         return False
-    if not tournament.is_public:
+    if not event.is_public:
         return False
-    if tournament.announce_message_id is not None:
+    if event.announce_message_id is not None:
         return False
 
     try:
         message = await bot.send_message(
             chat_id=settings.announce_chat_id,  # type: ignore[arg-type]
             message_thread_id=settings.announce_thread_id,
-            text=render_announcement(tournament),
+            text=render_announcement(event),
             disable_web_page_preview=True,
         )
     except TelegramAPIError as error:
-        logger.warning("Не удалось опубликовать анонс турнира %s: %s", tournament.id, error)
+        logger.warning("Не удалось опубликовать анонс мероприятия %s: %s", event.id, error)
         raise AnnounceError(str(error)) from error
 
-    tournament.announce_chat_id = message.chat.id
-    tournament.announce_message_id = message.message_id
+    event.announce_chat_id = message.chat.id
+    event.announce_message_id = message.message_id
     await session.commit()
-    logger.info("Анонс турнира %s опубликован: %s", tournament.id, message.message_id)
+    logger.info("Анонс мероприятия %s опубликован: %s", event.id, message.message_id)
     return True
 
 
-async def refresh(bot: Bot, tournament: Tournament) -> None:
+async def refresh(bot: Bot, event: Event) -> None:
     """Перерисовывает опубликованный анонс. Ошибки только логируем.
 
     Правка анонса — не критичный путь: если сообщение удалили или бота
-    выгнали из чата, турнир от этого ломаться не должен.
+    выгнали из чата, мероприятие от этого ломаться не должно.
     """
-    if tournament.announce_message_id is None or tournament.announce_chat_id is None:
+    if event.announce_message_id is None or event.announce_chat_id is None:
         return
     try:
         await bot.edit_message_text(
-            chat_id=tournament.announce_chat_id,
-            message_id=tournament.announce_message_id,
-            text=render_announcement(tournament),
+            chat_id=event.announce_chat_id,
+            message_id=event.announce_message_id,
+            text=render_announcement(event),
             disable_web_page_preview=True,
         )
     except TelegramAPIError as error:
         # "message is not modified" — тоже сюда, и это нормально.
-        logger.info("Анонс турнира %s не обновлён: %s", tournament.id, error)
+        logger.info("Анонс мероприятия %s не обновлён: %s", event.id, error)
 
 
 async def notify_user(bot: Bot, user_id: int, text: str, **kwargs) -> bool:

@@ -19,7 +19,7 @@ router = Router(name="admin_menu")
 @router.message(Command("admin"), F.chat.type == "private", IsAdmin())
 async def cmd_admin(message: Message, state: FSMContext) -> None:
     """Вход в админку сбрасывает незавершённые воронки — иначе легко
-    оказаться «внутри» создания турнира и не понимать, почему бот
+    оказаться «внутри» создания мероприятия и не понимать, почему бот
     просит ввести время."""
     await state.clear()
     await message.answer(texts.ADMIN_MENU, reply_markup=admin_menu_kb())

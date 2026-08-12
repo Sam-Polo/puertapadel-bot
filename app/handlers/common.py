@@ -17,12 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import texts
 from app.db.models import User
-from app.handlers.registration import PENDING_TOURNAMENT, start_registration
-from app.handlers.tournaments import send_tournament_card
+from app.handlers.events import send_event_card
+from app.handlers.registration import PENDING_EVENT, start_registration
 from app.keyboards.callbacks import MenuCB
 from app.keyboards.common import main_menu_kb, profile_kb
 from app.services import users as users_service
-from app.utils.formatting import q
+from app.utils.formatting import fmt_level, q
 from app.utils.tg import edit_or_send
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,11 @@ _DEEP_LINK_RE = re.compile(r"^t(\d+)$")
 
 
 def parse_deep_link(payload: str | None) -> int | None:
-    """«t42» -> 42. Всё остальное игнорируем."""
+    """«t42» -> 42. Всё остальное игнорируем.
+
+    Префикс «t» остался от прежнего названия сущности — менять его нельзя,
+    иначе перестанут работать ссылки в уже опубликованных анонсах.
+    """
     if not payload:
         return None
     match = _DEEP_LINK_RE.match(payload.strip())
@@ -58,12 +62,12 @@ async def cmd_start(
     зарегистрированный по ссылке. Плюс пятый — /start прямо посреди
     регистрации: воронка начинается заново, как и договаривались.
     """
-    tournament_id = parse_deep_link(command.args)
+    event_id = parse_deep_link(command.args)
 
     if not user.is_registered:
         await state.clear()
-        if tournament_id is not None:
-            await state.update_data({PENDING_TOURNAMENT: tournament_id})
+        if event_id is not None:
+            await state.update_data({PENDING_EVENT: event_id})
             await message.answer(texts.WELCOME_FROM_ANNOUNCE)
         else:
             await message.answer(texts.WELCOME)
@@ -72,8 +76,8 @@ async def cmd_start(
 
     await state.clear()
 
-    if tournament_id is not None:
-        await send_tournament_card(message, session, user, tournament_id, src="link")
+    if event_id is not None:
+        await send_event_card(message, session, user, event_id, src="link")
         return
 
     await message.answer(texts.MAIN_MENU, reply_markup=main_menu_kb())
@@ -115,7 +119,7 @@ async def open_profile(
             first_name=q(user.first_name),
             last_name=q(user.last_name),
             gender=texts.GENDER_LABEL.get(str(user.gender), "—"),
-            age=user.age,
+            level=fmt_level(user.level),
             registrations=count,
         ),
         profile_kb(),

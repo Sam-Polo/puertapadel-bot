@@ -1,9 +1,13 @@
 """Модели БД.
 
-Три сущности: пользователь, турнир, запись на турнир.
-Времена турнира хранятся «наивными» — в часовом поясе клуба (settings.tz),
-именно в таком виде их вводит админ и видят игроки. Служебные отметки
-(created_at и т.п.) — в UTC.
+Три сущности: пользователь, мероприятие, запись на мероприятие.
+Времена мероприятия хранятся «наивными» — в часовом поясе клуба
+(settings.tz), именно в таком виде их вводит админ и видят игроки.
+Служебные отметки (created_at и т.п.) — в UTC.
+
+Обязательны у мероприятия только название, дата и время начала: всё
+остальное админ вправе пропустить, и тогда строка просто не попадает
+в карточку.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -37,11 +42,11 @@ class Gender(enum.StrEnum):
     FEMALE = "female"
 
 
-class TournamentStatus(enum.StrEnum):
-    DRAFT = "draft"  # создаётся админом, ещё не опубликован
-    OPEN = "open"  # идёт набор игроков
+class EventStatus(enum.StrEnum):
+    DRAFT = "draft"  # создаётся админом, ещё не опубликовано
+    OPEN = "open"  # идёт набор участников
     CLOSED = "closed"  # набор закончен
-    CANCELLED = "cancelled"  # отменён
+    CANCELLED = "cancelled"  # отменено
 
 
 class RegistrationStatus(enum.StrEnum):
@@ -64,10 +69,14 @@ class User(Base):
     first_name: Mapped[str | None] = mapped_column(String(64))
     last_name: Mapped[str | None] = mapped_column(String(64))
     gender: Mapped[Gender | None] = mapped_column(Enum(Gender, native_enum=False, length=16))
-    age: Mapped[int | None] = mapped_column(Integer)
+
+    # Уровень игры в падел по шкале 0.00-7.00, игрок указывает сам.
+    # Бот его не проверяет и по нему никого не отсеивает — это ориентир
+    # для админа при формировании составов.
+    level: Mapped[float | None] = mapped_column(Float)
 
     phone: Mapped[str | None] = mapped_column(String(32))
-    comment: Mapped[str | None] = mapped_column(Text)  # заметка админа об игроке
+    comment: Mapped[str | None] = mapped_column(Text)  # заметка админа об участнике
 
     # Регистрация считается завершённой только когда проставлен этот момент.
     registered_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
@@ -95,36 +104,44 @@ class User(Base):
         return " ".join(tg_parts) or f"id{self.id}"
 
 
-class Tournament(Base):
-    __tablename__ = "tournaments"
+class Event(Base):
+    __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
+    # --- обязательное ---
     title: Mapped[str] = mapped_column(String(256))
-    location: Mapped[str] = mapped_column(String(128))
-
     date: Mapped[dt.date] = mapped_column(Date)
     time_start: Mapped[dt.time] = mapped_column(Time)
-    time_end: Mapped[dt.time] = mapped_column(Time)
 
-    max_players: Mapped[int] = mapped_column(Integer)
+    # --- всё, что можно пропустить ---
+    time_end: Mapped[dt.time | None] = mapped_column(Time)
+    location: Mapped[str | None] = mapped_column(String(128))
 
-    # Свободный текст: "от 3.10 до 3.40", "3+", "любой". Бот его не валидирует,
-    # отсев игроков не по уровню — ручная работа админа.
+    # None = набор без ограничения по числу мест.
+    max_players: Mapped[int | None] = mapped_column(Integer)
+
+    # Свободный текст: "от 3.10 до 3.40", "3+". Бот его не валидирует,
+    # отсев участников по уровню — ручная работа админа.
     rating_text: Mapped[str | None] = mapped_column(String(64))
-    is_rated: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Стоимость участия. В анонс не идёт — показывается игроку перед
+    # None = строку про рейтинговость в карточке не показываем вовсе.
+    is_rated: Mapped[bool | None] = mapped_column(Boolean)
+
+    # Стоимость участия. В анонс не идёт — показывается участнику перед
     # подтверждением записи и админу в админке.
     price: Mapped[int | None] = mapped_column(Integer)
 
-    # Публичный турнир виден в списке и анонсируется в чат.
-    # Скрытый доступен только по прямой ссылке.
+    # Произвольный текст в конце карточки, отделённый пустой строкой.
+    description: Mapped[str | None] = mapped_column(Text)
+
+    # Публичное мероприятие видно в списке и анонсируется в чат.
+    # Скрытое доступно только по прямой ссылке.
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    status: Mapped[TournamentStatus] = mapped_column(
-        Enum(TournamentStatus, native_enum=False, length=16),
-        default=TournamentStatus.DRAFT,
+    status: Mapped[EventStatus] = mapped_column(
+        Enum(EventStatus, native_enum=False, length=16),
+        default=EventStatus.DRAFT,
     )
 
     # Координаты опубликованного анонса — чтобы отредактировать при смене статуса.
@@ -137,7 +154,7 @@ class Tournament(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    registrations: Mapped[list[Registration]] = relationship(back_populates="tournament")
+    registrations: Mapped[list[Registration]] = relationship(back_populates="event")
 
     @property
     def starts_at(self) -> dt.datetime:
@@ -146,7 +163,14 @@ class Tournament(Base):
 
     @property
     def ends_at(self) -> dt.datetime:
-        """Если конец раньше начала — считаем, что турнир перешёл за полночь."""
+        """Момент, после которого мероприятие считается прошедшим.
+
+        Время окончания необязательно: если его не указали, считаем, что
+        мероприятие идёт до конца суток. Если конец раньше начала —
+        значит, оно перешло за полночь.
+        """
+        if self.time_end is None:
+            return dt.datetime.combine(self.date, dt.time.max)
         end = dt.datetime.combine(self.date, self.time_end)
         if end <= self.starts_at:
             end += dt.timedelta(days=1)
@@ -154,21 +178,25 @@ class Tournament(Base):
 
     @property
     def accepts_signups(self) -> bool:
-        return self.status is TournamentStatus.OPEN
+        return self.status is EventStatus.OPEN
+
+    @property
+    def has_limit(self) -> bool:
+        return self.max_players is not None
 
 
 class Registration(Base):
     __tablename__ = "registrations"
     __table_args__ = (
-        # Одна строка на пару (турнир, игрок): повторная запись после отмены
-        # переиспользует её, меняя статус обратно на active.
-        UniqueConstraint("tournament_id", "user_id", name="uq_registration_tournament_user"),
+        # Одна строка на пару (мероприятие, участник): повторная запись после
+        # отмены переиспользует её, меняя статус обратно на active.
+        UniqueConstraint("event_id", "user_id", name="uq_registration_event_user"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    tournament_id: Mapped[int] = mapped_column(
-        ForeignKey("tournaments.id", ondelete="CASCADE"), index=True
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), index=True
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
 
@@ -177,11 +205,18 @@ class Registration(Base):
         default=RegistrationStatus.ACTIVE,
     )
 
+    # Сколько мест занимает запись: 1 — за себя, 2 — за себя и напарника.
+    # Занятость мероприятия считается суммой seats, а не числом строк.
+    seats: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+    # Имя напарника, когда записались за двоих.
+    partner_name: Mapped[str | None] = mapped_column(String(128))
+
     is_paid: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     # Момент последней активной записи — по нему строится порядок в составе.
     registered_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
     cancelled_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
-    tournament: Mapped[Tournament] = relationship(back_populates="registrations")
+    event: Mapped[Event] = relationship(back_populates="registrations")
     user: Mapped[User] = relationship(back_populates="registrations")
