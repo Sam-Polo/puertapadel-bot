@@ -23,6 +23,7 @@ from app.keyboards.common import (
     agreement_kb,
     back_to_menu_kb,
     gender_kb,
+    level_kb,
     main_menu_kb,
     registration_confirm_kb,
 )
@@ -146,28 +147,37 @@ async def on_gender(
     await callback.answer()
     await state.update_data(gender=callback_data.value)
     await state.set_state(RegistrationSG.level)
-    await edit_or_send(callback, texts.ASK_LEVEL)
+    await edit_or_send(callback, texts.ASK_LEVEL, level_kb())
+
+
+def _confirm_text(data: dict) -> str:
+    return texts.REGISTRATION_CONFIRM.format(
+        first_name=q(data["first_name"]),
+        last_name=q(data["last_name"]),
+        gender=texts.GENDER_LABEL[data["gender"]],
+        # Уровень можно пропустить — тогда в сводке «не указан».
+        level=fmt_level(data.get("level")),
+    )
 
 
 @router.message(RegistrationSG.level, F.text)
 async def on_level(message: Message, state: FSMContext) -> None:
     level = parse_level(message.text or "")
     if level is None:
-        await message.answer(texts.BAD_LEVEL)
+        await message.answer(texts.BAD_LEVEL, reply_markup=level_kb())
         return
 
-    await state.update_data(level=level)
-    data = await state.get_data()
+    data = await state.update_data(level=level)
     await state.set_state(RegistrationSG.confirm)
-    await message.answer(
-        texts.REGISTRATION_CONFIRM.format(
-            first_name=q(data["first_name"]),
-            last_name=q(data["last_name"]),
-            gender=texts.GENDER_LABEL[data["gender"]],
-            level=fmt_level(data["level"]),
-        ),
-        reply_markup=registration_confirm_kb(),
-    )
+    await message.answer(_confirm_text(data), reply_markup=registration_confirm_kb())
+
+
+@router.callback_query(RegistrationSG.level, RegCB.filter(F.action == "skip_level"))
+async def on_skip_level(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer("Пропущено")
+    data = await state.update_data(level=None)
+    await state.set_state(RegistrationSG.confirm)
+    await edit_or_send(callback, _confirm_text(data), registration_confirm_kb())
 
 
 @router.callback_query(RegistrationSG.confirm, RegCB.filter(F.action == "confirm"))
@@ -190,7 +200,7 @@ async def on_confirm(
         first_name=data["first_name"],
         last_name=data["last_name"],
         gender=data["gender"],
-        level=data["level"],
+        level=data.get("level"),
         agreement_accepted_at=accepted_at,
     )
     logger.info("Пользователь %s завершил регистрацию", user.id)

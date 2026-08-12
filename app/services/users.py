@@ -49,7 +49,7 @@ async def complete_registration(
     first_name: str,
     last_name: str,
     gender: str,
-    level: float,
+    level: float | None,
     agreement_accepted_at: dt.datetime,
 ) -> User:
     user.first_name = first_name

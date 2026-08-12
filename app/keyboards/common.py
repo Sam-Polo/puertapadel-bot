@@ -37,6 +37,13 @@ def gender_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def level_kb() -> InlineKeyboardMarkup:
+    """Уровень — единственный необязательный шаг регистрации."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⏭ Пропустить", callback_data=RegCB(action="skip_level"))
+    return builder.as_markup()
+
+
 def registration_confirm_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Всё верно", callback_data=RegCB(action="confirm"))
