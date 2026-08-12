@@ -197,9 +197,13 @@ def user_line(
     *,
     index: int | None = None,
     paid: bool | None = None,
-    seats: int = 1,
 ) -> str:
-    """Строка участника в составе — для админских списков."""
+    """Строка участника в составе — для админских списков.
+
+    Отметка об оплате словами, а не значком, и только когда за участие
+    вообще берут деньги: `paid=None` убирает её целиком. Число занятых
+    мест не пишем — напарник идёт отдельной строкой, и так видно.
+    """
     prefix = f"{index}. " if index is not None else ""
     name = q(user.full_name)
     link = f'<a href="tg://user?id={user.id}">{name}</a>'
@@ -211,12 +215,11 @@ def user_line(
     tail = f" ({', '.join(extras)})" if extras else ""
     money = ""
     if paid is not None:
-        money = " 💰" if paid else " ⏳"
-    seats_mark = f" ×{seats}" if seats > 1 else ""
-    return f"{prefix}{link}{tail}{seats_mark}{money}"
+        money = " — оплачено" if paid else " — не оплачено"
+    return f"{prefix}{link}{tail}{money}"
 
 
 def partner_line(registration: Registration, *, index: int) -> str:
     """Строка напарника — идёт следом за строкой того, кто его записал."""
     owner = q(registration.user.full_name)
-    return f"{index}. ↳ {q(registration.partner_name)} — гость ({owner})"
+    return f"{index}. {q(registration.partner_name)} (записан от {owner})"

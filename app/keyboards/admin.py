@@ -202,14 +202,18 @@ def admin_participants_kb(
     participants: list[tuple[User, bool]],
     *,
     page: int,
+    show_payment: bool = True,
 ) -> InlineKeyboardMarkup:
-    """Кнопка на каждого участника — переключает отметку об оплате."""
+    """Кнопка на каждого участника — переключает отметку об оплате.
+
+    Если стоимость не задана, значок оплаты не рисуем: отмечать нечего.
+    """
     builder = InlineKeyboardBuilder()
     for index, (user, is_paid) in enumerate(participants, start=1):
-        mark = "💰" if is_paid else "⏳"
+        mark = ("💰 " if is_paid else "⏳ ") if show_payment else ""
         builder.row(
             InlineKeyboardButton(
-                text=f"{mark} {index}. {user.full_name}",
+                text=f"{mark}{index}. {user.full_name}",
                 callback_data=AdminCB(
                     action="paid", id=event.id, page=page, value=str(user.id)
                 ).pack(),

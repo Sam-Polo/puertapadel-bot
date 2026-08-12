@@ -247,10 +247,11 @@ ANNOUNCE_ALREADY = "Анонс уже опубликован."
 ADMIN_EVENTS_EMPTY = "Мероприятий пока нет. Создайте первое 👇"
 ADMIN_PARTICIPANTS_EMPTY = "На мероприятие пока никто не записался."
 ADMIN_PARTICIPANTS = (
-    "👥 <b>Состав</b> · {title}\n\n{lines}\n\n"
-    "Занято мест: {taken}{limit}\n"
-    "💰 — оплатил, ⏳ — не оплатил"
+    "👥 <b>Состав</b> · {title}\n\n{lines}\n\nЗанято мест: {taken}{limit}{hint}"
 )
+
+# Подсказка про оплату — только когда за участие берут деньги.
+ADMIN_PARTICIPANTS_PAID_HINT = "\n\nНажмите на участника, чтобы отметить оплату."
 
 ADMIN_USER_CARD = (
     "👤 <b>{full_name}</b>\n\n"

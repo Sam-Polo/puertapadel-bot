@@ -113,6 +113,9 @@ async def show_players(
         )
         return
 
+    # Отметки об оплате имеют смысл, только если за участие берут деньги.
+    tracks_payment = bool(event.price)
+
     # Напарник получает собственный номер в списке: для админа это
     # отдельный человек, который придёт и займёт место.
     lines: list[str] = []
@@ -122,8 +125,7 @@ async def show_players(
             user_line(
                 user,
                 index=seat_number,
-                paid=registration.is_paid,
-                seats=registration.seats,
+                paid=registration.is_paid if tracks_payment else None,
             )
         )
         seat_number += 1
@@ -139,11 +141,13 @@ async def show_players(
             lines="\n".join(lines),
             taken=taken,
             limit=_limit_suffix(event),
+            hint=texts.ADMIN_PARTICIPANTS_PAID_HINT if tracks_payment else "",
         ),
         admin_participants_kb(
             event,
             [(user, registration.is_paid) for user, registration in rows],
             page=page,
+            show_payment=tracks_payment,
         ),
     )
 
