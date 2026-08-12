@@ -39,15 +39,6 @@ def skip_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[_SKIP], [_ABORT]])
 
 
-def title_kb() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✏️ Ввести название целиком", callback_data=AdminCB(action="title_full"))
-    builder.adjust(1)
-    markup = builder.as_markup()
-    markup.inline_keyboard.append([_ABORT])
-    return markup
-
-
 def locations_kb(recent: list[str]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     # value ограничен размером callback_data, поэтому передаём индекс в списке.

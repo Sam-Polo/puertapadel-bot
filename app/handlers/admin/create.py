@@ -2,8 +2,7 @@
 
 Обязательны только дата, время начала и название — остальные шаги
 пропускаются кнопкой, и пропущенные поля просто не попадают в карточку.
-Дата и время идут первыми, потому что из них собирается служебный
-префикс названия «(СБ1100) 1904».
+Название админ вводит целиком, бот к нему ничего не приписывает.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ from app.keyboards.admin import (
     preview_kb,
     price_kb,
     skip_kb,
-    title_kb,
     visibility_kb,
     yes_no_kb,
 )
@@ -36,7 +34,7 @@ from app.keyboards.callbacks import AdminCB
 from app.services import announce
 from app.services import events as events_service
 from app.states import NewEventSG
-from app.utils.dates import fmt_date, now, parse_date, parse_time, title_prefix
+from app.utils.dates import fmt_date, now, parse_date, parse_time
 from app.utils.formatting import render_preview
 from app.utils.tg import edit_or_send
 
@@ -87,11 +85,8 @@ async def _go_time_end(state: FSMContext) -> tuple[str, object]:
 
 
 async def _go_title(state: FSMContext) -> tuple[str, object]:
-    data = await state.get_data()
     await state.set_state(NewEventSG.title)
-    date = dt.date.fromisoformat(data["date"])
-    time_start = dt.time.fromisoformat(data["time_start"])
-    return texts.NEW_ASK_TITLE.format(prefix=title_prefix(date, time_start)), title_kb()
+    return texts.NEW_ASK_TITLE, abort_kb()
 
 
 async def _go_location(state: FSMContext, session: AsyncSession) -> tuple[str, object]:
@@ -230,26 +225,9 @@ async def on_time_end(message: Message, state: FSMContext) -> None:
 # --- Шаг 4: название (обязательный) ---
 
 
-@router.callback_query(NewEventSG.title, AdminCB.filter(F.action == "title_full"))
-async def on_title_full(callback: CallbackQuery, state: FSMContext) -> None:
-    """Админ хочет ввести название целиком, без служебного префикса."""
-    await callback.answer()
-    await state.update_data(skip_prefix=True)
-    await edit_or_send(callback, texts.NEW_ASK_TITLE_FULL, abort_kb())
-
-
 @router.message(NewEventSG.title, F.text)
 async def on_title(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    raw = (message.text or "").strip()
-    data = await state.get_data()
-
-    if data.get("skip_prefix"):
-        title = raw
-    else:
-        date = dt.date.fromisoformat(data["date"])
-        time_start = dt.time.fromisoformat(data["time_start"])
-        title = f"{title_prefix(date, time_start)} {raw}"
-
+    title = (message.text or "").strip()
     if not (3 <= len(title) <= 150):
         await message.answer(texts.NEW_BAD_TITLE, reply_markup=abort_kb())
         return

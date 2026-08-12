@@ -89,7 +89,3 @@ def fmt_date_short(value: dt.date) -> str:
     return f"{value.strftime('%d.%m')} ({WEEKDAY_SHORT[value.weekday()]})"
 
 
-def title_prefix(date: dt.date, time_start: dt.time) -> str:
-    """Служебный префикс названия мероприятия: «(СБ1100) 1904»."""
-    weekday = WEEKDAY_SHORT[date.weekday()]
-    return f"({weekday}{time_start.strftime('%H%M')}) {date.strftime('%d%m')}"
