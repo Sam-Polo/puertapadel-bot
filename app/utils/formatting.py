@@ -36,6 +36,9 @@ STATUS_BADGE = {
 LEVEL_MIN = 0.0
 LEVEL_MAX = 7.0
 
+# Жёсткий лимит Telegram на длину текстового сообщения.
+TELEGRAM_MESSAGE_LIMIT = 4096
+
 
 def q(value: object) -> str:
     """Экранирование под parse_mode=HTML."""
@@ -127,13 +130,51 @@ def _with_description(lines: list[str], event: Event) -> list[str]:
     return lines
 
 
-def render_announcement(event: Event) -> str:
-    """Текст анонса для группового чата. Без состава и без видимости."""
+def render_announcement(
+    event: Event,
+    *,
+    taken: int = 0,
+    roster: list[tuple[User, Registration]] | None = None,
+) -> str:
+    """Текст анонса для группового чата. Без пометки о видимости.
+
+    Состав показываем, если админ его не скрыл. Длина сообщения в
+    Telegram ограничена 4096 символами, а описание может занять половину
+    этого запаса — поэтому список при необходимости подрезаем.
+    """
     settings = get_settings()
-    lines = _with_description(_core_lines(event), event)
-    lines.append("")
-    lines.append(f'👉 <a href="{settings.deep_link(event.id)}">Записаться в боте</a>')
-    return "\n".join(lines)
+    lines = _core_lines(event)
+    lines.append(f"👥 Записано: {fmt_capacity(event, taken)}")
+    lines = _with_description(lines, event)
+
+    footer = ["", f'👉 <a href="{settings.deep_link(event.id)}">Записаться в боте</a>']
+
+    if event.show_roster and roster:
+        roster_lines = render_roster(roster, is_doubles=event.is_doubles)
+        head = "\n".join([*lines, "", "<b>Состав:</b>"])
+        tail = "\n".join(footer)
+        lines = _fit_roster(head, roster_lines, tail)
+        return "\n".join([lines, tail])
+
+    return "\n".join([*lines, *footer])
+
+
+def _fit_roster(head: str, roster_lines: list[str], tail: str) -> str:
+    """Складывает шапку и состав так, чтобы влезть в лимит сообщения."""
+    budget = TELEGRAM_MESSAGE_LIMIT - len(head) - len(tail) - 32
+    kept: list[str] = []
+    used = 0
+    for line in roster_lines:
+        if used + len(line) + 1 > budget:
+            break
+        kept.append(line)
+        used += len(line) + 1
+
+    result = "\n".join([head, *kept])
+    hidden = len(roster_lines) - len(kept)
+    if hidden > 0:
+        result += f"\n… и ещё {hidden} — весь список в боте"
+    return result
 
 
 def render_roster(

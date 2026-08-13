@@ -191,6 +191,8 @@ async def on_kick(
             "Админ %s снял участника %s с мероприятия %s",
             callback.from_user.id, player_id, event.id,
         )
+        if callback.bot is not None:
+            announce.schedule_refresh(callback.bot, event.id)
     await show_players(callback, session, event, page=callback_data.page)
 
 
@@ -210,7 +212,7 @@ async def on_status(
 
     # В чате висит анонс со старым статусом — перерисовываем.
     if callback.bot is not None:
-        await announce.refresh(callback.bot, event)
+        await announce.refresh(callback.bot, session, event)
 
     await show_event(callback, session, event, page=callback_data.page)
 
@@ -283,7 +285,7 @@ async def on_cancel_confirm(
                     title=q(event.title), when=fmt_when(event)
                 ),
             )
-        await announce.refresh(callback.bot, event)
+        await announce.refresh(callback.bot, session, event)
 
     logger.info(
         "Админ %s отменил мероприятие %s, уведомлено %s участников",

@@ -395,6 +395,11 @@ async def do_signup(
         )
         return
 
+    # Анонс в чате обновится через несколько секунд вместе с соседними
+    # записями — участник этого не ждёт.
+    if callback.bot is not None:
+        announce.schedule_refresh(callback.bot, event.id)
+
     await callback.answer("Готово!")
     template = texts.SIGNUP_OK_DOUBLE if event.is_doubles else texts.SIGNUP_OK
     await edit_or_send(
@@ -451,6 +456,9 @@ async def do_cancel(
 
     await callback.answer("Запись отменена")
     taken = await events_service.seats_taken(session, event.id)
+
+    if callback.bot is not None:
+        announce.schedule_refresh(callback.bot, event.id)
 
     # Админу это важно знать: места освободились, возможно кого-то надо позвать.
     if callback.bot is not None and event.status is not EventStatus.CANCELLED:
