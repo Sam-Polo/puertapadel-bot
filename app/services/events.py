@@ -15,8 +15,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_settings
 from app.db.models import (
     Event,
+    EventFormat,
     EventStatus,
     Registration,
     RegistrationStatus,
@@ -34,7 +36,7 @@ class SignupResult(enum.StrEnum):
     OK = "ok"
     ALREADY = "already"
     NO_SLOTS = "no_slots"
-    NO_SLOTS_FOR_TWO = "no_slots_for_two"
+    NO_SLOTS_FOR_PAIR = "no_slots_for_pair"
     CLOSED = "closed"
     CANCELLED = "cancelled"
     PASSED = "passed"
@@ -146,10 +148,14 @@ async def signup(
     event: Event,
     user: User,
     *,
-    seats: int = 1,
     partner_name: str | None = None,
 ) -> tuple[SignupResult, int]:
-    """Записывает участника. Возвращает (результат, занято мест после)."""
+    """Записывает участника. Возвращает (результат, занято мест после).
+
+    Сколько мест занять, решает формат мероприятия, а не вызывающий:
+    в парном это всегда два, в одиночном — одно.
+    """
+    seats = event.seats_per_signup
     async with _locks[event.id]:
         # Пока мы ждали блокировку, соседний апдейт мог занять последнее место.
         # Его коммит не виден внутри уже открытой транзакции этой сессии
@@ -181,9 +187,9 @@ async def signup(
             if free <= 0:
                 return SignupResult.NO_SLOTS, taken
             if free < seats:
-                # Места есть, но на двоих не хватает — это отдельный случай,
-                # участнику предложим записаться одному.
-                return SignupResult.NO_SLOTS_FOR_TWO, taken
+                # Осталось нечётное место на парном мероприятии: занять его
+                # некому — записываются только вдвоём.
+                return SignupResult.NO_SLOTS_FOR_PAIR, taken
 
         if registration is None:
             registration = Registration(
@@ -276,18 +282,6 @@ async def cancel_event(session: AsyncSession, event: Event) -> list[int]:
         return user_ids
 
 
-async def recent_locations(session: AsyncSession, limit: int = 5) -> list[str]:
-    """Локации из последних мероприятий — подсказки при создании нового."""
-    stmt = (
-        select(Event.location, func.max(Event.created_at).label("last_used"))
-        .where(Event.location.is_not(None))
-        .group_by(Event.location)
-        .order_by(func.max(Event.created_at).desc())
-        .limit(limit)
-    )
-    return [row[0] for row in (await session.execute(stmt)).all()]
-
-
 async def create(
     session: AsyncSession,
     *,
@@ -295,13 +289,14 @@ async def create(
     date: dt.date,
     time_start: dt.time,
     time_end: dt.time | None,
-    location: str | None,
+    event_format: EventFormat,
     max_players: int | None,
     rating_text: str | None,
     is_rated: bool | None,
     price: int | None,
     description: str | None,
     is_public: bool,
+    show_roster: bool,
     status: EventStatus,
     created_by: int,
 ) -> Event:
@@ -310,13 +305,16 @@ async def create(
         date=date,
         time_start=time_start,
         time_end=time_end,
-        location=location,
+        format=event_format,
+        # Локация одна на клуб и при создании не спрашивается.
+        location=get_settings().location_name,
         max_players=max_players,
         rating_text=rating_text,
         is_rated=is_rated,
         price=price,
         description=description,
         is_public=is_public,
+        show_roster=show_roster,
         status=status,
         created_by=created_by,
     )

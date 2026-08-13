@@ -119,6 +119,7 @@ def event_card_kb(
     page: int,
     src: str,
     is_full: bool,
+    share_text: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -137,56 +138,21 @@ def event_card_kb(
     back_action = "my" if src == "my" else "events"
     builder.button(text="⬅️ Назад", callback_data=MenuCB(action=back_action))
     builder.adjust(1)
-    return builder.as_markup()
+    markup = builder.as_markup()
+
+    # Позвать знакомых можно с любой карточки, не только сразу после записи.
+    if share_text is not None and event.accepts_signups:
+        markup.inline_keyboard.insert(
+            len(markup.inline_keyboard) - 1, [share_button(event, share_text)]
+        )
+    return markup
 
 
-def seats_choice_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup:
-    """Первый шаг записи: за себя или ещё за одного человека."""
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="👤 Только за себя",
-        callback_data=EventCB(
-            action="seats", id=event.id, page=page, src=src, value="1"
-        ),
-    )
-    builder.button(
-        text="👥 За себя и ещё одного",
-        callback_data=EventCB(
-            action="seats", id=event.id, page=page, src=src, value="2"
-        ),
-    )
-    builder.button(
-        text="⬅️ Назад",
-        callback_data=EventCB(action="view", id=event.id, page=page, src=src),
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def signup_confirm_kb(event: Event, *, page: int, src: str, seats: int) -> InlineKeyboardMarkup:
+def signup_confirm_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text="✅ Подтвердить запись",
-        callback_data=EventCB(
-            action="signup_ok", id=event.id, page=page, src=src, value=str(seats)
-        ),
-    )
-    builder.button(
-        text="⬅️ Назад",
-        callback_data=EventCB(action="signup", id=event.id, page=page, src=src),
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def only_myself_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup:
-    """Мест на двоих не хватило — предлагаем записаться одному."""
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="👤 Записаться только за себя",
-        callback_data=EventCB(
-            action="seats", id=event.id, page=page, src=src, value="1"
-        ),
+        callback_data=EventCB(action="signup_ok", id=event.id, page=page, src=src),
     )
     builder.button(
         text="⬅️ Назад",
@@ -194,6 +160,14 @@ def only_myself_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup
     )
     builder.adjust(1)
     return builder.as_markup()
+
+
+def share_button(event: Event, share_text: str) -> InlineKeyboardButton:
+    """Кнопка «переслать другу» — Telegram сам предложит выбрать чат."""
+    return InlineKeyboardButton(
+        text="📤 Отправить ссылку другу",
+        url=get_settings().share_link(event.id, share_text),
+    )
 
 
 def cancel_confirm_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMarkup:
@@ -218,9 +192,16 @@ def profile_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def after_signup_kb() -> InlineKeyboardMarkup:
+def after_signup_kb(event: Event, share_text: str) -> InlineKeyboardMarkup:
+    """Сразу после записи первым делом предлагаем позвать знакомых."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="📋 Мои записи", callback_data=MenuCB(action="my"))
-    builder.button(text="🎾 Другие мероприятия", callback_data=MenuCB(action="events"))
-    builder.adjust(1)
+    builder.row(share_button(event, share_text))
+    builder.row(
+        InlineKeyboardButton(text="📋 Мои записи", callback_data=MenuCB(action="my").pack())
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🎾 Другие мероприятия", callback_data=MenuCB(action="events").pack()
+        )
+    )
     return builder.as_markup()

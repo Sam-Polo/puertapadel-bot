@@ -10,7 +10,9 @@ from app.db.models import Event, EventStatus, User
 from app.keyboards.callbacks import AdminCB
 from app.utils.formatting import event_button_label
 
-MAX_PLAYERS_PRESETS = (4, 8, 12, 16)
+# Парное меряем парами, одиночное — людьми. Вместимость выходит одна и та же.
+MAX_PAIRS_PRESETS = (6, 8, 10, 12)
+MAX_PLAYERS_PRESETS = tuple(pairs * 2 for pairs in MAX_PAIRS_PRESETS)
 
 _ABORT = InlineKeyboardButton(
     text="✖️ Отменить создание", callback_data=AdminCB(action="abort").pack()
@@ -39,28 +41,50 @@ def skip_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[_SKIP], [_ABORT]])
 
 
-def locations_kb(recent: list[str]) -> InlineKeyboardMarkup:
+def format_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    # value ограничен размером callback_data, поэтому передаём индекс в списке.
-    for index, name in enumerate(recent):
-        builder.row(
-            InlineKeyboardButton(
-                text=f"📍 {name}",
-                callback_data=AdminCB(action="loc", value=str(index)).pack(),
-            )
+    builder.button(
+        text="👤 Одиночное", callback_data=AdminCB(action="fmt", value="singles")
+    )
+    builder.button(
+        text="👥 Парное", callback_data=AdminCB(action="fmt", value="doubles")
+    )
+    builder.adjust(2)
+    markup = builder.as_markup()
+    markup.inline_keyboard.append([_ABORT])
+    return markup
+
+
+def max_players_kb(*, is_doubles: bool) -> InlineKeyboardMarkup:
+    """В парном кнопки считают пары, в одиночном — места.
+
+    Значение в callback — всегда то, что нажал админ (пары или места);
+    в места его переводит обработчик, знающий формат.
+    """
+    builder = InlineKeyboardBuilder()
+    presets = MAX_PAIRS_PRESETS if is_doubles else MAX_PLAYERS_PRESETS
+    suffix = " пар" if is_doubles else ""
+    for value in presets:
+        builder.button(
+            text=f"{value}{suffix}", callback_data=AdminCB(action="max", value=str(value))
         )
-    builder.row(_SKIP)
-    builder.row(_ABORT)
-    return builder.as_markup()
-
-
-def max_players_kb() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for value in MAX_PLAYERS_PRESETS:
-        builder.button(text=str(value), callback_data=AdminCB(action="max", value=str(value)))
-    builder.adjust(len(MAX_PLAYERS_PRESETS))
+    builder.adjust(len(presets))
     markup = builder.as_markup()
     markup.inline_keyboard.append([_SKIP])
+    markup.inline_keyboard.append([_ABORT])
+    return markup
+
+
+def show_roster_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="👁 Показывать состав", callback_data=AdminCB(action="roster", value="1")
+    )
+    builder.button(
+        text="🙈 Скрыть состав", callback_data=AdminCB(action="roster", value="0")
+    )
+    builder.adjust(1)
+    markup = builder.as_markup()
     markup.inline_keyboard.append([_ABORT])
     return markup
 

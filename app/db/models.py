@@ -42,6 +42,13 @@ class Gender(enum.StrEnum):
     FEMALE = "female"
 
 
+class EventFormat(enum.StrEnum):
+    """Одиночный — каждый записывается сам. Парный — строго вдвоём."""
+
+    SINGLES = "singles"
+    DOUBLES = "doubles"
+
+
 class EventStatus(enum.StrEnum):
     DRAFT = "draft"  # создаётся админом, ещё не опубликовано
     OPEN = "open"  # идёт набор участников
@@ -114,10 +121,26 @@ class Event(Base):
     date: Mapped[dt.date] = mapped_column(Date)
     time_start: Mapped[dt.time] = mapped_column(Time)
 
+    # Формат задаётся при создании и дальше не меняется: переключение
+    # на записанном составе оставило бы людей без пары.
+    format: Mapped[EventFormat] = mapped_column(
+        Enum(EventFormat, native_enum=False, length=16),
+        default=EventFormat.SINGLES,
+        # Именно .name: SQLAlchemy хранит Enum по именам членов, а не по
+        # значениям, и server_default должен совпадать с тем, что в колонке.
+        server_default=EventFormat.SINGLES.name,
+    )
+
     # --- всё, что можно пропустить ---
     time_end: Mapped[dt.time | None] = mapped_column(Time)
+
+    # Не спрашивается при создании — подставляется из настроек клуба.
+    # Поле сохранено, чтобы прошлые мероприятия не переписывались, если
+    # у клуба когда-нибудь появится второй корт.
     location: Mapped[str | None] = mapped_column(String(128))
 
+    # Всегда в людях, даже когда мероприятие парное: так лимиты и счётчики
+    # остаются одной арифметикой, а пары — только способом ввода и показа.
     # None = набор без ограничения по числу мест.
     max_players: Mapped[int | None] = mapped_column(Integer)
 
@@ -138,6 +161,11 @@ class Event(Base):
     # Публичное мероприятие видно в списке и анонсируется в чат.
     # Скрытое доступно только по прямой ссылке.
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Видят ли участники состав в карточке. Админ видит его всегда.
+    show_roster: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1"
+    )
 
     status: Mapped[EventStatus] = mapped_column(
         Enum(EventStatus, native_enum=False, length=16),
@@ -183,6 +211,22 @@ class Event(Base):
     @property
     def has_limit(self) -> bool:
         return self.max_players is not None
+
+    @property
+    def is_doubles(self) -> bool:
+        return self.format is EventFormat.DOUBLES
+
+    @property
+    def seats_per_signup(self) -> int:
+        """Сколько мест занимает одна запись: в парном — всегда два."""
+        return 2 if self.is_doubles else 1
+
+    @property
+    def max_pairs(self) -> int | None:
+        """Вместимость в парах — для показа и кнопок парного мероприятия."""
+        if self.max_players is None:
+            return None
+        return self.max_players // 2
 
 
 class Registration(Base):

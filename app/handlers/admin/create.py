@@ -1,8 +1,12 @@
 """Воронка создания мероприятия.
 
-Обязательны только дата, время начала и название — остальные шаги
-пропускаются кнопкой, и пропущенные поля просто не попадают в карточку.
-Название админ вводит целиком, бот к нему ничего не приписывает.
+Обязательны дата, время начала, название, формат, видимость и показ
+состава — остальные шаги пропускаются кнопкой, и пропущенные поля просто
+не попадают в карточку. Название админ вводит целиком, локация берётся
+из настроек клуба и не спрашивается.
+
+Формат идёт до количества мест: от него зависит, считаем мы пары или
+людей.
 """
 
 from __future__ import annotations
@@ -17,15 +21,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import texts
 from app.config import get_settings
-from app.db.models import Event, EventStatus, User
+from app.db.models import Event, EventFormat, EventStatus, User
 from app.filters import IsAdmin
 from app.keyboards.admin import (
     abort_kb,
     admin_menu_kb,
-    locations_kb,
+    format_kb,
     max_players_kb,
     preview_kb,
     price_kb,
+    show_roster_kb,
     skip_kb,
     visibility_kb,
     yes_no_kb,
@@ -34,8 +39,8 @@ from app.keyboards.callbacks import AdminCB
 from app.services import announce
 from app.services import events as events_service
 from app.states import NewEventSG
-from app.utils.dates import fmt_date, now, parse_date, parse_time
-from app.utils.formatting import render_preview
+from app.utils.dates import now, parse_date, parse_time
+from app.utils.formatting import fmt_when, render_preview
 from app.utils.tg import edit_or_send
 
 logger = logging.getLogger(__name__)
@@ -46,6 +51,8 @@ router.callback_query.filter(IsAdmin())
 
 MAX_PLAYERS_MIN = 2
 MAX_PLAYERS_MAX = 64
+MAX_PAIRS_MIN = 1
+MAX_PAIRS_MAX = 32
 PRICE_MAX = 1_000_000
 DESCRIPTION_MAX = 2000
 
@@ -76,7 +83,12 @@ async def on_abort(callback: CallbackQuery, state: FSMContext) -> None:
 # Каждый шаг умеет показать себя двумя способами: новым сообщением (после
 # текстового ввода) и правкой текущего (после нажатия кнопки). Поэтому
 # переходы вынесены в отдельные функции — их зовут и обработчики ввода,
-# и обработчики «Пропустить».
+# и обработчик «Пропустить».
+
+
+async def _is_doubles(state: FSMContext) -> bool:
+    data = await state.get_data()
+    return data.get("format") == EventFormat.DOUBLES.value
 
 
 async def _go_time_end(state: FSMContext) -> tuple[str, object]:
@@ -89,16 +101,16 @@ async def _go_title(state: FSMContext) -> tuple[str, object]:
     return texts.NEW_ASK_TITLE, abort_kb()
 
 
-async def _go_location(state: FSMContext, session: AsyncSession) -> tuple[str, object]:
-    await state.set_state(NewEventSG.location)
-    recent = await events_service.recent_locations(session)
-    await state.update_data(recent_locations=recent)
-    return texts.NEW_ASK_LOCATION, locations_kb(recent) if recent else skip_kb()
+async def _go_format(state: FSMContext) -> tuple[str, object]:
+    await state.set_state(NewEventSG.event_format)
+    return texts.NEW_ASK_FORMAT, format_kb()
 
 
 async def _go_max_players(state: FSMContext) -> tuple[str, object]:
+    doubles = await _is_doubles(state)
     await state.set_state(NewEventSG.max_players)
-    return texts.NEW_ASK_MAX_PLAYERS, max_players_kb()
+    text = texts.NEW_ASK_MAX_PAIRS if doubles else texts.NEW_ASK_MAX_PLAYERS
+    return text, max_players_kb(is_doubles=doubles)
 
 
 async def _go_rating(state: FSMContext) -> tuple[str, object]:
@@ -121,6 +133,11 @@ async def _go_visibility(state: FSMContext) -> tuple[str, object]:
     return texts.NEW_ASK_VISIBILITY, visibility_kb()
 
 
+async def _go_show_roster(state: FSMContext) -> tuple[str, object]:
+    await state.set_state(NewEventSG.show_roster)
+    return texts.NEW_ASK_SHOW_ROSTER, show_roster_kb()
+
+
 async def _go_description(state: FSMContext) -> tuple[str, object]:
     await state.set_state(NewEventSG.description)
     return texts.NEW_ASK_DESCRIPTION, skip_kb()
@@ -133,47 +150,37 @@ async def _go_preview(state: FSMContext) -> tuple[str, object]:
     return text, preview_kb()
 
 
-# Что показывать после «Пропустить» на каждом необязательном шаге.
-_SKIP_NEXT = {
-    NewEventSG.time_end.state: ("time_end", None),
-    NewEventSG.location.state: ("location", None),
-    NewEventSG.max_players.state: ("max_players", None),
-    NewEventSG.rating.state: ("rating_text", None),
-    NewEventSG.is_rated.state: ("is_rated", None),
-    NewEventSG.price.state: ("price", None),
-    NewEventSG.description.state: ("description", None),
+# Необязательные шаги: какое поле обнуляем и куда идём дальше.
+_SKIPPABLE: dict[str, str] = {
+    NewEventSG.time_end.state: "time_end",
+    NewEventSG.max_players.state: "max_players",
+    NewEventSG.rating.state: "rating_text",
+    NewEventSG.is_rated.state: "is_rated",
+    NewEventSG.price.state: "price",
+    NewEventSG.description.state: "description",
+}
+
+_NEXT_AFTER_SKIP = {
+    NewEventSG.time_end.state: _go_title,
+    NewEventSG.max_players.state: _go_rating,
+    NewEventSG.rating.state: _go_is_rated,
+    NewEventSG.is_rated.state: _go_price,
+    NewEventSG.price.state: _go_visibility,
+    NewEventSG.description.state: _go_preview,
 }
 
 
 @router.callback_query(AdminCB.filter(F.action == "skip"))
-async def on_skip(
-    callback: CallbackQuery, state: FSMContext, session: AsyncSession
-) -> None:
+async def on_skip(callback: CallbackQuery, state: FSMContext) -> None:
     """Общая кнопка «Пропустить» — какой шаг пропускаем, знает FSM."""
     current = await state.get_state()
-    if current not in _SKIP_NEXT:
+    if current not in _SKIPPABLE:
         await callback.answer("Этот шаг пропустить нельзя", show_alert=True)
         return
 
-    field, value = _SKIP_NEXT[current]
-    await state.update_data({field: value})
+    await state.update_data({_SKIPPABLE[current]: None})
     await callback.answer("Пропущено")
-
-    if current == NewEventSG.time_end.state:
-        text, markup = await _go_title(state)
-    elif current == NewEventSG.location.state:
-        text, markup = await _go_max_players(state)
-    elif current == NewEventSG.max_players.state:
-        text, markup = await _go_rating(state)
-    elif current == NewEventSG.rating.state:
-        text, markup = await _go_is_rated(state)
-    elif current == NewEventSG.is_rated.state:
-        text, markup = await _go_price(state)
-    elif current == NewEventSG.price.state:
-        text, markup = await _go_visibility(state)
-    else:  # description
-        text, markup = await _go_preview(state)
-
+    text, markup = await _NEXT_AFTER_SKIP[current](state)
     await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
 
 
@@ -226,51 +233,36 @@ async def on_time_end(message: Message, state: FSMContext) -> None:
 
 
 @router.message(NewEventSG.title, F.text)
-async def on_title(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def on_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not (3 <= len(title) <= 150):
         await message.answer(texts.NEW_BAD_TITLE, reply_markup=abort_kb())
         return
 
     await state.update_data(title=title)
-    text, markup = await _go_location(state, session)
+    text, markup = await _go_format(state)
     await message.answer(text, reply_markup=markup)  # type: ignore[arg-type]
 
 
-# --- Шаг 5: локация ---
+# --- Шаг 5: формат (обязательный) ---
 
 
-@router.callback_query(NewEventSG.location, AdminCB.filter(F.action == "loc"))
-async def on_location_preset(
+@router.callback_query(NewEventSG.event_format, AdminCB.filter(F.action == "fmt"))
+async def on_format(
     callback: CallbackQuery, callback_data: AdminCB, state: FSMContext
 ) -> None:
-    data = await state.get_data()
-    recent: list[str] = data.get("recent_locations", [])
-    try:
-        location = recent[int(callback_data.value)]
-    except (ValueError, IndexError):
-        await callback.answer("Не нашёл эту локацию, введите текстом", show_alert=True)
-        return
-
     await callback.answer()
-    await state.update_data(location=location)
+    await state.update_data(format=callback_data.value)
     text, markup = await _go_max_players(state)
     await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
 
 
-@router.message(NewEventSG.location, F.text)
-async def on_location(message: Message, state: FSMContext) -> None:
-    location = (message.text or "").strip()
-    if not (2 <= len(location) <= 100):
-        await message.answer(texts.NEW_BAD_LOCATION, reply_markup=skip_kb())
-        return
-
-    await state.update_data(location=location)
-    text, markup = await _go_max_players(state)
-    await message.answer(text, reply_markup=markup)  # type: ignore[arg-type]
+# --- Шаг 6: вместимость ---
 
 
-# --- Шаг 6: количество мест ---
+def _seats_from_input(value: int, *, is_doubles: bool) -> int:
+    """В парном админ вводит пары, а хранится всё в местах."""
+    return value * 2 if is_doubles else value
 
 
 @router.callback_query(NewEventSG.max_players, AdminCB.filter(F.action == "max"))
@@ -278,19 +270,28 @@ async def on_max_players_preset(
     callback: CallbackQuery, callback_data: AdminCB, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(max_players=int(callback_data.value))
+    doubles = await _is_doubles(state)
+    seats = _seats_from_input(int(callback_data.value), is_doubles=doubles)
+    await state.update_data(max_players=seats)
     text, markup = await _go_rating(state)
     await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
 
 
 @router.message(NewEventSG.max_players, F.text)
 async def on_max_players(message: Message, state: FSMContext) -> None:
+    doubles = await _is_doubles(state)
     raw = (message.text or "").strip()
-    if not raw.isdigit() or not (MAX_PLAYERS_MIN <= int(raw) <= MAX_PLAYERS_MAX):
-        await message.answer(texts.NEW_BAD_MAX_PLAYERS, reply_markup=max_players_kb())
+    low, high = (
+        (MAX_PAIRS_MIN, MAX_PAIRS_MAX) if doubles else (MAX_PLAYERS_MIN, MAX_PLAYERS_MAX)
+    )
+    if not raw.isdigit() or not (low <= int(raw) <= high):
+        error = texts.NEW_BAD_MAX_PAIRS if doubles else texts.NEW_BAD_MAX_PLAYERS
+        await message.answer(error, reply_markup=max_players_kb(is_doubles=doubles))
         return
 
-    await state.update_data(max_players=int(raw))
+    await state.update_data(
+        max_players=_seats_from_input(int(raw), is_doubles=doubles)
+    )
     text, markup = await _go_rating(state)
     await message.answer(text, reply_markup=markup)  # type: ignore[arg-type]
 
@@ -342,7 +343,7 @@ async def on_price(message: Message, state: FSMContext) -> None:
     await message.answer(text, reply_markup=markup)  # type: ignore[arg-type]
 
 
-# --- Шаг 10: видимость ---
+# --- Шаг 10-11: видимость мероприятия и состава ---
 
 
 @router.callback_query(NewEventSG.visibility, AdminCB.filter(F.action == "vis"))
@@ -351,11 +352,21 @@ async def on_visibility(
 ) -> None:
     await callback.answer()
     await state.update_data(is_public=callback_data.value == "1")
+    text, markup = await _go_show_roster(state)
+    await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
+
+
+@router.callback_query(NewEventSG.show_roster, AdminCB.filter(F.action == "roster"))
+async def on_show_roster(
+    callback: CallbackQuery, callback_data: AdminCB, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.update_data(show_roster=callback_data.value == "1")
     text, markup = await _go_description(state)
     await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
 
 
-# --- Шаг 11: описание ---
+# --- Шаг 12: описание ---
 
 
 @router.message(NewEventSG.description, F.text)
@@ -373,6 +384,10 @@ async def on_description(message: Message, state: FSMContext) -> None:
 # --- Сохранение ---
 
 
+def _draft_format(data: dict) -> EventFormat:
+    return EventFormat(data.get("format", EventFormat.SINGLES.value))
+
+
 def _build_draft(data: dict) -> Event:
     """Непривязанный к сессии объект — только чтобы отрисовать предпросмотр."""
     return Event(
@@ -383,13 +398,15 @@ def _build_draft(data: dict) -> Event:
         time_end=(
             dt.time.fromisoformat(data["time_end"]) if data.get("time_end") else None
         ),
-        location=data.get("location"),
+        format=_draft_format(data),
+        location=get_settings().location_name,
         max_players=data.get("max_players"),
         rating_text=data.get("rating_text"),
         is_rated=data.get("is_rated"),
         price=data.get("price"),
         description=data.get("description"),
         is_public=data.get("is_public", True),
+        show_roster=data.get("show_roster", True),
         status=EventStatus.DRAFT,
         created_by=0,
     )
@@ -406,13 +423,14 @@ async def _persist(
         time_end=(
             dt.time.fromisoformat(data["time_end"]) if data.get("time_end") else None
         ),
-        location=data.get("location"),
+        event_format=_draft_format(data),
         max_players=data.get("max_players"),
         rating_text=data.get("rating_text"),
         is_rated=data.get("is_rated"),
         price=data.get("price"),
         description=data.get("description"),
         is_public=data.get("is_public", True),
+        show_roster=data.get("show_roster", True),
         status=status,
         created_by=admin_id,
     )
@@ -453,7 +471,7 @@ async def on_publish(
             )
 
     lines.append("")
-    lines.append(f"📅 {fmt_date(event.date)}")
+    lines.append(f"📅 {fmt_when(event)}")
     lines.append(f"🔗 Ссылка на запись:\n{get_settings().deep_link(event.id)}")
 
     logger.info("Админ %s опубликовал мероприятие %s", user.id, event.id)
@@ -467,7 +485,6 @@ async def on_publish(
 @router.message(NewEventSG.time_start)
 @router.message(NewEventSG.time_end)
 @router.message(NewEventSG.title)
-@router.message(NewEventSG.location)
 @router.message(NewEventSG.max_players)
 @router.message(NewEventSG.rating)
 @router.message(NewEventSG.price)
@@ -476,8 +493,10 @@ async def on_wrong_content(message: Message) -> None:
     await message.answer("Жду текст 👆")
 
 
+@router.message(NewEventSG.event_format)
 @router.message(NewEventSG.is_rated)
 @router.message(NewEventSG.visibility)
+@router.message(NewEventSG.show_roster)
 @router.message(NewEventSG.preview)
 async def on_expected_button(message: Message) -> None:
     await message.answer("Нажмите одну из кнопок выше 👆")

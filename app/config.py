@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import cached_property, lru_cache
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, field_validator
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
 
     announce_chat_id: int | None = Field(default=None, alias="ANNOUNCE_CHAT_ID")
     announce_thread_id: int | None = Field(default=None, alias="ANNOUNCE_THREAD_ID")
+
+    # Локация одна на все мероприятия, при создании её не спрашивают.
+    location_name: str = Field(default="Puerta Padel", alias="LOCATION_NAME")
 
     tz: str = Field(default="Europe/Moscow", alias="TZ")
     db_path: str = Field(default="data/bot.sqlite3", alias="DB_PATH")
@@ -87,6 +91,15 @@ class Settings(BaseSettings):
 
     def deep_link(self, event_id: int) -> str:
         return f"https://t.me/{self.bot_username}?start=t{event_id}"
+
+    def share_link(self, event_id: int, text: str) -> str:
+        """Ссылка «переслать другу»: Telegram сам предложит выбрать чат.
+
+        Через t.me/share, а не switch_inline_query — тот потребовал бы
+        включённого inline-режима у бота.
+        """
+        params = urlencode({"url": self.deep_link(event_id), "text": text})
+        return f"https://t.me/share/url?{params}"
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids

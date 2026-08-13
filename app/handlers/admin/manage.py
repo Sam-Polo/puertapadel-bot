@@ -21,14 +21,7 @@ from app.keyboards.admin import (
 from app.keyboards.callbacks import AdminCB
 from app.services import announce
 from app.services import events as events_service
-from app.utils.dates import fmt_date
-from app.utils.formatting import (
-    fmt_when_short,
-    partner_line,
-    q,
-    render_for_admin,
-    user_line,
-)
+from app.utils.formatting import fmt_capacity, fmt_when, q, render_for_admin, user_line
 from app.utils.tg import edit_or_send, paginate
 
 logger = logging.getLogger(__name__)
@@ -37,10 +30,6 @@ router = Router(name="admin_manage")
 router.callback_query.filter(IsAdmin())
 
 PAGE_SIZE = 8
-
-
-def _limit_suffix(event: Event) -> str:
-    return f" из {event.max_players}" if event.max_players is not None else ""
 
 
 async def show_events(
@@ -116,22 +105,17 @@ async def show_players(
     # Отметки об оплате имеют смысл, только если за участие берут деньги.
     tracks_payment = bool(event.price)
 
-    # Напарник получает собственный номер в списке: для админа это
-    # отдельный человек, который придёт и займёт место.
-    lines: list[str] = []
-    seat_number = 1
-    for user, registration in rows:
-        lines.append(
-            user_line(
-                user,
-                index=seat_number,
-                paid=registration.is_paid if tracks_payment else None,
-            )
+    # В парном мероприятии единица списка — пара, поэтому нумеруем пары,
+    # а не людей, и оба имени идут одной строкой.
+    lines = [
+        user_line(
+            user,
+            index=index,
+            paid=registration.is_paid if tracks_payment else None,
+            partner_name=registration.partner_name if event.is_doubles else None,
         )
-        seat_number += 1
-        if registration.seats > 1 and registration.partner_name:
-            lines.append(partner_line(registration, index=seat_number))
-            seat_number += 1
+        for index, (user, registration) in enumerate(rows, start=1)
+    ]
 
     taken = await events_service.seats_taken(session, event.id)
     await edit_or_send(
@@ -139,8 +123,7 @@ async def show_players(
         texts.ADMIN_PARTICIPANTS.format(
             title=q(event.title),
             lines="\n".join(lines),
-            taken=taken,
-            limit=_limit_suffix(event),
+            taken=fmt_capacity(event, taken),
             hint=texts.ADMIN_PARTICIPANTS_PAID_HINT if tracks_payment else "",
         ),
         admin_participants_kb(
@@ -201,7 +184,7 @@ async def on_kick(
                 callback.bot,
                 player_id,
                 texts.NOTIFY_PLAYER_REMOVED.format(
-                    title=q(event.title), date=fmt_date(event.date)
+                    title=q(event.title), when=fmt_when(event)
                 ),
             )
         logger.info(
@@ -297,9 +280,7 @@ async def on_cancel_confirm(
                 callback.bot,
                 user_ids,
                 texts.NOTIFY_PLAYER_EVENT_CANCELLED.format(
-                    title=q(event.title),
-                    date=fmt_date(event.date),
-                    time=fmt_when_short(event),
+                    title=q(event.title), when=fmt_when(event)
                 ),
             )
         await announce.refresh(callback.bot, event)

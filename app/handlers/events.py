@@ -1,8 +1,8 @@
 """Пользовательская часть: список мероприятий, карточка, запись и отмена.
 
-Запись идёт в три шага: «за себя или за двоих» → (имя напарника) →
-подтверждение со стоимостью. Занятые места считаются суммой seats, поэтому
-запись за двоих сразу закрывает два места.
+Как проходит запись, решает формат мероприятия, а не участник:
+одиночное — сразу экран подтверждения, парное — сначала имя напарника,
+и места занимаются парой.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import texts
-from app.db.models import Event, EventStatus, User
+from app.db.models import Event, EventStatus, Registration, User
 from app.keyboards.callbacks import EventCB, MenuCB, PageCB
 from app.keyboards.common import (
     PAGE_SIZE,
@@ -25,8 +25,6 @@ from app.keyboards.common import (
     cancel_confirm_kb,
     event_card_kb,
     events_list_kb,
-    only_myself_kb,
-    seats_choice_kb,
     signup_confirm_kb,
     start_registration_kb,
 )
@@ -34,8 +32,13 @@ from app.services import announce
 from app.services import events as events_service
 from app.services.events import SignupResult
 from app.states import SignupSG
-from app.utils.dates import fmt_date
-from app.utils.formatting import fmt_price, fmt_when_short, q, render_for_player
+from app.utils.formatting import (
+    fmt_capacity,
+    fmt_price,
+    fmt_when,
+    q,
+    render_for_player,
+)
 from app.utils.tg import edit_or_send, paginate
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,10 @@ _SIGNUP_ERRORS = {
     SignupResult.CANCELLED: texts.SIGNUP_CANCELLED_EVENT,
     SignupResult.PASSED: texts.SIGNUP_PASSED,
 }
+
+
+def share_text(event: Event) -> str:
+    return texts.SHARE_TEXT.format(title=event.title, when=fmt_when(event))
 
 
 async def show_events_list(
@@ -117,10 +124,17 @@ def _is_full(event: Event, taken: int) -> bool:
 
 async def _card_payload(
     session: AsyncSession, event: Event, user: User
-) -> tuple[str, int, object]:
+) -> tuple[str, int, Registration | None]:
     taken = await events_service.seats_taken(session, event.id)
     registration = await events_service.get_registration(session, event.id, user.id)
-    text = render_for_player(event, taken=taken, my_registration=registration)
+    roster = (
+        await events_service.participants(session, event.id)
+        if event.show_roster
+        else None
+    )
+    text = render_for_player(
+        event, taken=taken, my_registration=registration, roster=roster
+    )
     return text, taken, registration
 
 
@@ -147,10 +161,11 @@ async def show_event_card(
         text,
         event_card_kb(
             event,
-            my_registration=registration,  # type: ignore[arg-type]
+            my_registration=registration,
             page=page,
             src=src,
             is_full=_is_full(event, taken),
+            share_text=share_text(event),
         ),
     )
 
@@ -177,10 +192,11 @@ async def send_event_card(
         text,
         reply_markup=event_card_kb(
             event,
-            my_registration=registration,  # type: ignore[arg-type]
+            my_registration=registration,
             page=0,
             src=src,
             is_full=_is_full(event, taken),
+            share_text=share_text(event),
         ),
         disable_web_page_preview=True,
     )
@@ -222,11 +238,29 @@ async def view_event(
     )
 
 
+def _render_confirm(event: Event, *, partner_name: str | None) -> str:
+    participants = (
+        texts.PARTICIPANTS_PAIR.format(partner=q(partner_name))
+        if event.is_doubles and partner_name
+        else texts.PARTICIPANTS_SINGLE
+    )
+    return texts.SIGNUP_CONFIRM.format(
+        title=q(event.title),
+        when=fmt_when(event),
+        participants=participants,
+        price=fmt_price(event.price),
+    )
+
+
 @router.callback_query(EventCB.filter(F.action == "signup"))
-async def ask_seats(
-    callback: CallbackQuery, callback_data: EventCB, session: AsyncSession, user: User
+async def start_signup(
+    callback: CallbackQuery,
+    callback_data: EventCB,
+    session: AsyncSession,
+    user: User,
+    state: FSMContext,
 ) -> None:
-    """Первый шаг записи: за себя или ещё за одного."""
+    """Одиночное — сразу подтверждение, парное — сначала имя напарника."""
     event = await events_service.get(session, callback_data.id)
     if event is None:
         await callback.answer(texts.EVENT_NOT_FOUND, show_alert=True)
@@ -244,79 +278,30 @@ async def ask_seats(
 
     taken = await events_service.seats_taken(session, event.id)
     if _is_full(event, taken):
-        await callback.answer(
-            texts.SIGNUP_NO_SLOTS.format(max_players=event.max_players), show_alert=True
-        )
+        await callback.answer(texts.SIGNUP_NO_SLOTS, show_alert=True)
         await show_event_card(
             callback, session, user, event.id, page=callback_data.page, src=callback_data.src
         )
         return
 
-    await callback.answer()
-    await edit_or_send(
-        callback,
-        texts.ASK_SEATS.format(
-            title=q(event.title),
-            date=fmt_date(event.date),
-            time=fmt_when_short(event),
-        ),
-        seats_choice_kb(event, page=callback_data.page, src=callback_data.src),
-    )
-
-
-def _render_confirm(event: Event, *, seats: int, partner_name: str | None) -> str:
-    location = f"📍 {q(event.location)}\n" if event.location else ""
-    seats_label = (
-        texts.SEATS_LABEL_DOUBLE.format(partner=q(partner_name))
-        if seats > 1 and partner_name
-        else texts.SEATS_LABEL_SINGLE
-    )
-    return texts.SIGNUP_CONFIRM.format(
-        title=q(event.title),
-        date=fmt_date(event.date),
-        time=fmt_when_short(event),
-        location=location,
-        seats_label=seats_label,
-        price=fmt_price(event.price),
-    )
-
-
-@router.callback_query(EventCB.filter(F.action == "seats"))
-async def on_seats_chosen(
-    callback: CallbackQuery,
-    callback_data: EventCB,
-    session: AsyncSession,
-    user: User,
-    state: FSMContext,
-) -> None:
-    event = await events_service.get(session, callback_data.id)
-    if event is None:
-        await callback.answer(texts.EVENT_NOT_FOUND, show_alert=True)
-        return
-
-    seats = 2 if callback_data.value == "2" else 1
-    taken = await events_service.seats_taken(session, event.id)
-
-    if event.max_players is not None and event.max_players - taken < seats:
-        # На двоих не хватило — не тупик: предлагаем записаться одному.
-        await callback.answer()
-        await edit_or_send(
-            callback,
-            texts.SIGNUP_NO_SLOTS_FOR_TWO,
-            only_myself_kb(event, page=callback_data.page, src=callback_data.src),
-        )
-        return
+    if event.max_players is not None:
+        free = event.max_players - taken
+        if free < event.seats_per_signup:
+            await callback.answer(texts.SIGNUP_NO_SLOTS_FOR_PAIR, show_alert=True)
+            await show_event_card(
+                callback, session, user, event.id,
+                page=callback_data.page, src=callback_data.src,
+            )
+            return
 
     await callback.answer()
 
-    if seats == 1:
+    if not event.is_doubles:
         await state.clear()
         await edit_or_send(
             callback,
-            _render_confirm(event, seats=1, partner_name=None),
-            signup_confirm_kb(
-                event, page=callback_data.page, src=callback_data.src, seats=1
-            ),
+            _render_confirm(event, partner_name=None),
+            signup_confirm_kb(event, page=callback_data.page, src=callback_data.src),
         )
         return
 
@@ -346,9 +331,9 @@ async def on_partner_name(
     partner_name = raw.title()
     await state.update_data(partner_name=partner_name)
     await message.answer(
-        _render_confirm(event, seats=2, partner_name=partner_name),
+        _render_confirm(event, partner_name=partner_name),
         reply_markup=signup_confirm_kb(
-            event, page=int(data["page"]), src=str(data["src"]), seats=2
+            event, page=int(data["page"]), src=str(data["src"])
         ),
     )
 
@@ -371,11 +356,10 @@ async def do_signup(
         await callback.answer(texts.EVENT_NOT_FOUND, show_alert=True)
         return
 
-    seats = 2 if callback_data.value == "2" else 1
     data = await state.get_data()
-    partner_name = data.get("partner_name") if seats > 1 else None
+    partner_name = data.get("partner_name") if event.is_doubles else None
 
-    if seats > 1 and not partner_name:
+    if event.is_doubles and not partner_name:
         # Состояние потерялось (например, бот перезапустился) — спросим заново.
         await callback.answer()
         await state.set_state(SignupSG.partner_name)
@@ -386,25 +370,21 @@ async def do_signup(
         return
 
     result, taken = await events_service.signup(
-        session, event, user, seats=seats, partner_name=partner_name
+        session, event, user, partner_name=partner_name
     )
     await state.clear()
 
     if result is SignupResult.NO_SLOTS:
-        await callback.answer(
-            texts.SIGNUP_NO_SLOTS.format(max_players=event.max_players), show_alert=True
-        )
+        await callback.answer(texts.SIGNUP_NO_SLOTS, show_alert=True)
         await show_event_card(
             callback, session, user, event.id, page=callback_data.page, src=callback_data.src
         )
         return
 
-    if result is SignupResult.NO_SLOTS_FOR_TWO:
-        await callback.answer()
-        await edit_or_send(
-            callback,
-            texts.SIGNUP_NO_SLOTS_FOR_TWO,
-            only_myself_kb(event, page=callback_data.page, src=callback_data.src),
+    if result is SignupResult.NO_SLOTS_FOR_PAIR:
+        await callback.answer(texts.SIGNUP_NO_SLOTS_FOR_PAIR, show_alert=True)
+        await show_event_card(
+            callback, session, user, event.id, page=callback_data.page, src=callback_data.src
         )
         return
 
@@ -416,47 +396,37 @@ async def do_signup(
         return
 
     await callback.answer("Готово!")
-    template = texts.SIGNUP_OK_DOUBLE if seats > 1 else texts.SIGNUP_OK
+    template = texts.SIGNUP_OK_DOUBLE if event.is_doubles else texts.SIGNUP_OK
     await edit_or_send(
         callback,
         template.format(
-            title=q(event.title),
-            date=fmt_date(event.date),
-            time=fmt_when_short(event),
-            partner=q(partner_name),
-        ),
-        after_signup_kb(),
+            title=q(event.title), when=fmt_when(event), partner=q(partner_name)
+        )
+        + texts.SIGNUP_SHARE_HINT,
+        after_signup_kb(event, share_text(event)),
     )
     logger.info(
         "Участник %s записан на мероприятие %s (мест: %s, занято %s)",
-        user.id, event.id, seats, taken,
+        user.id, event.id, event.seats_per_signup, taken,
     )
 
 
 @router.callback_query(EventCB.filter(F.action == "cancel"))
 async def ask_cancel_confirm(
-    callback: CallbackQuery, callback_data: EventCB, session: AsyncSession, user: User
+    callback: CallbackQuery, callback_data: EventCB, session: AsyncSession
 ) -> None:
     event = await events_service.get(session, callback_data.id)
     if event is None:
         await callback.answer(texts.EVENT_NOT_FOUND, show_alert=True)
         return
 
-    registration = await events_service.get_registration(session, event.id, user.id)
-    freed = (
-        texts.FREED_TWO
-        if registration is not None and registration.seats > 1
-        else texts.FREED_ONE
-    )
-
     await callback.answer()
     await edit_or_send(
         callback,
         texts.CANCEL_CONFIRM.format(
             title=q(event.title),
-            date=fmt_date(event.date),
-            time=fmt_when_short(event),
-            freed=freed,
+            when=fmt_when(event),
+            freed=texts.FREED_PAIR if event.is_doubles else texts.FREED_ONE,
         ),
         cancel_confirm_kb(event, page=callback_data.page, src=callback_data.src),
     )
@@ -484,16 +454,14 @@ async def do_cancel(
 
     # Админу это важно знать: места освободились, возможно кого-то надо позвать.
     if callback.bot is not None and event.status is not EventStatus.CANCELLED:
-        limit = f" из {event.max_players}" if event.max_players is not None else ""
         await announce.notify_admins(
             callback.bot,
             texts.NOTIFY_ADMIN_CANCEL.format(
                 user=q(user.full_name),
                 title=q(event.title),
-                date=fmt_date(event.date),
+                when=fmt_when(event),
                 seats=registration.seats,
-                taken=taken,
-                limit=limit,
+                taken=fmt_capacity(event, taken),
             ),
         )
 

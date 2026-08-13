@@ -19,12 +19,14 @@ class NewEventSG(StatesGroup):
     time_start = State()
     time_end = State()
     title = State()
-    location = State()
+    # Формат до вместимости: от него зависит, считаем пары или людей.
+    event_format = State()
     max_players = State()
     rating = State()
     is_rated = State()
     price = State()
     visibility = State()
+    show_roster = State()
     description = State()
     preview = State()
 
