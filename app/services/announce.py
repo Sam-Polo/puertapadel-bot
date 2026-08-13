@@ -122,6 +122,35 @@ async def refresh(bot: Bot, session: AsyncSession, event: Event) -> None:
         logger.info("Анонс мероприятия %s не обновлён: %s", event.id, error)
 
 
+async def remove(bot: Bot, session: AsyncSession, event: Event) -> bool:
+    """Убирает анонс из чата. False — если удалить не вышло.
+
+    Удаление ограничено: своё сообщение бот убирает в течение 48 часов,
+    а без ограничения по возрасту — только будучи администратором чата с
+    правом удаления сообщений. Поэтому неудача здесь штатна: в таком
+    случае вызывающий помечает анонс отменённым, чтобы в чате не осталось
+    приглашения на мероприятие, которого больше нет.
+    """
+    if event.announce_message_id is None or event.announce_chat_id is None:
+        return False
+
+    try:
+        await bot.delete_message(
+            chat_id=event.announce_chat_id, message_id=event.announce_message_id
+        )
+    except TelegramAPIError as error:
+        logger.info("Анонс мероприятия %s не удалён: %s", event.id, error)
+        return False
+
+    logger.info("Анонс мероприятия %s удалён из чата", event.id)
+    # Сообщения больше нет — забываем координаты, иначе следующая правка
+    # будет стучаться в пустоту.
+    event.announce_chat_id = None
+    event.announce_message_id = None
+    await session.commit()
+    return True
+
+
 def schedule_refresh(bot: Bot, event_id: int) -> None:
     """Просит обновить анонс — не сразу, а вместе с соседними правками.
 

@@ -276,6 +276,7 @@ async def on_cancel_confirm(
     user_ids = await events_service.cancel_event(session, event)
 
     sent = 0
+    removed = False
     if callback.bot is not None:
         if user_ids:
             sent = await announce.notify_users(
@@ -285,11 +286,22 @@ async def on_cancel_confirm(
                     title=q(event.title), when=fmt_when(event)
                 ),
             )
-        await announce.refresh(callback.bot, session, event)
+        # Отменённого мероприятия в чате быть не должно. Если удалить не
+        # дали — хотя бы перепишем сообщение на «отменено», чтобы туда
+        # никто не записывался.
+        removed = await announce.remove(callback.bot, session, event)
+        if not removed:
+            await announce.refresh(callback.bot, session, event)
 
     logger.info(
-        "Админ %s отменил мероприятие %s, уведомлено %s участников",
-        user.id, event.id, sent,
+        "Админ %s отменил мероприятие %s, уведомлено %s участников, анонс %s",
+        user.id, event.id, sent, "удалён" if removed else "помечен отменённым",
     )
-    await callback.answer(texts.EVENT_CANCELLED_OK.format(sent=sent), show_alert=True)
+    await callback.answer(
+        texts.EVENT_CANCELLED_OK.format(
+            sent=sent,
+            announce=texts.ANNOUNCE_REMOVED if removed else texts.ANNOUNCE_MARKED,
+        ),
+        show_alert=True,
+    )
     await show_event(callback, session, event, page=callback_data.page)

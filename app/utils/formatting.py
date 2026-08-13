@@ -99,11 +99,42 @@ def format_label(event: Event) -> str:
     return "👥 Парное (записываются вдвоём)" if event.is_doubles else "👤 Одиночное"
 
 
-def _core_lines(event: Event) -> list[str]:
+def is_full(event: Event, taken: int) -> bool:
+    return event.max_players is not None and taken >= event.max_players
+
+
+def status_line(event: Event, taken: int | None = None) -> str:
+    """Статус для показа.
+
+    Статус в БД — намерение админа (набор идёт / закрыт / отменено), а
+    заполненность меняется сама и в обе стороны. Поэтому забитое
+    мероприятие мы не «закрываем», а показываем как «мест нет»: стоит
+    кому-то отмениться — надпись сама вернётся к «идёт набор».
+    """
+    if (
+        taken is not None
+        and event.status is EventStatus.OPEN
+        and is_full(event, taken)
+    ):
+        return "🔴 Статус: Мест нет"
+    return STATUS_LABEL[event.status]
+
+
+def status_badge(event: Event, taken: int | None = None) -> str:
+    if (
+        taken is not None
+        and event.status is EventStatus.OPEN
+        and is_full(event, taken)
+    ):
+        return "🔴"
+    return STATUS_BADGE[event.status]
+
+
+def _core_lines(event: Event, taken: int | None = None) -> list[str]:
     """Строки, общие для всех вариантов карточки."""
     lines = [
         f"❗️ <b>{q(event.title)}</b>",
-        STATUS_LABEL[event.status],
+        status_line(event, taken),
         format_label(event),
     ]
     if event.rating_text:
@@ -143,7 +174,7 @@ def render_announcement(
     этого запаса — поэтому список при необходимости подрезаем.
     """
     settings = get_settings()
-    lines = _core_lines(event)
+    lines = _core_lines(event, taken)
     lines.append(f"👥 Записано: {fmt_capacity(event, taken)}")
     lines = _with_description(lines, event)
 
@@ -204,7 +235,7 @@ def render_for_player(
     roster: list[tuple[User, Registration]] | None = None,
 ) -> str:
     """Карточка внутри бота: + занятость, состав и мой статус."""
-    lines = _core_lines(event)
+    lines = _core_lines(event, taken)
 
     if event.max_players is None:
         lines.append(f"👥 Записано: {fmt_capacity(event, taken)}")
@@ -238,7 +269,7 @@ def render_for_player(
 
 def render_for_admin(event: Event, *, taken: int, paid: int) -> str:
     """Карточка мероприятия в админке — с видимостью и служебными полями."""
-    lines = _core_lines(event)
+    lines = _core_lines(event, taken)
     lines.append("✅ Видно всем" if event.is_public else "🙈 Скрытое (только по ссылке)")
     lines.append(
         "👁 Состав виден участникам" if event.show_roster else "🙈 Состав скрыт от участников"
@@ -263,7 +294,7 @@ def render_preview(event: Event) -> str:
 
 def event_button_label(event: Event, *, taken: int | None = None) -> str:
     """Подпись в списке: «🟢 19.04 (СБ) 11:00 — Женский Friendsday [3/8 пар]»."""
-    badge = STATUS_BADGE[event.status]
+    badge = status_badge(event, taken)
     counter = f" [{fmt_capacity(event, taken)}]" if taken is not None else ""
     return (
         f"{badge} {fmt_date_short(event.date)} {fmt_time(event.time_start)}"

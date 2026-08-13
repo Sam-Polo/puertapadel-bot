@@ -140,8 +140,9 @@ def event_card_kb(
     builder.adjust(1)
     markup = builder.as_markup()
 
-    # Позвать знакомых можно с любой карточки, не только сразу после записи.
-    if share_text is not None and event.accepts_signups:
+    # Позвать знакомых можно с любой карточки, не только сразу после записи,
+    # но только пока есть куда звать: иначе друг придёт на «мест нет».
+    if share_text is not None and event.accepts_signups and not is_full:
         markup.inline_keyboard.insert(
             len(markup.inline_keyboard) - 1, [share_button(event, share_text)]
         )
@@ -192,10 +193,16 @@ def profile_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def after_signup_kb(event: Event, share_text: str) -> InlineKeyboardMarkup:
-    """Сразу после записи первым делом предлагаем позвать знакомых."""
+def after_signup_kb(
+    event: Event, share_text: str, *, is_full: bool = False
+) -> InlineKeyboardMarkup:
+    """Сразу после записи первым делом предлагаем позвать знакомых.
+
+    Если участник занял последнее место, звать уже некуда.
+    """
     builder = InlineKeyboardBuilder()
-    builder.row(share_button(event, share_text))
+    if not is_full:
+        builder.row(share_button(event, share_text))
     builder.row(
         InlineKeyboardButton(text="📋 Мои записи", callback_data=MenuCB(action="my").pack())
     )

@@ -407,8 +407,8 @@ async def do_signup(
         template.format(
             title=q(event.title), when=fmt_when(event), partner=q(partner_name)
         )
-        + texts.SIGNUP_SHARE_HINT,
-        after_signup_kb(event, share_text(event)),
+        + (texts.SIGNUP_SHARE_HINT if not _is_full(event, taken) else ""),
+        after_signup_kb(event, share_text(event), is_full=_is_full(event, taken)),
     )
     logger.info(
         "Участник %s записан на мероприятие %s (мест: %s, занято %s)",
