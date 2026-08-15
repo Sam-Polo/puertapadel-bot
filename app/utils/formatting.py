@@ -154,10 +154,16 @@ def _core_lines(event: Event, taken: int | None = None) -> list[str]:
 
 
 def _with_description(lines: list[str], event: Event) -> list[str]:
-    """Описание — отдельным абзацем в самом конце, моноширинным блоком."""
+    """Описание — отдельным абзацем в конце, цитатой под заголовком.
+
+    blockquote, а не code: цитата переносит длинные строки по словам и
+    не превращает текст в моноширинную простыню с горизонтальным
+    скроллом на узких экранах.
+    """
     if event.description:
         lines.append("")
-        lines.append(f"<code>{q(event.description)}</code>")
+        lines.append("<b>Регламент:</b>")
+        lines.append(f"<blockquote>{q(event.description)}</blockquote>")
     return lines
 
 

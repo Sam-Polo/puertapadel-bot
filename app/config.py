@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import cached_property, lru_cache
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, field_validator
@@ -97,8 +97,14 @@ class Settings(BaseSettings):
 
         Через t.me/share, а не switch_inline_query — тот потребовал бы
         включённого inline-режима у бота.
+
+        quote_via=quote обязателен: по умолчанию urlencode кодирует пробел
+        как «+» (это формат веб-форм), и в готовом сообщении вместо
+        пробелов появлялись плюсы.
         """
-        params = urlencode({"url": self.deep_link(event_id), "text": text})
+        params = urlencode(
+            {"url": self.deep_link(event_id), "text": text}, quote_via=quote
+        )
         return f"https://t.me/share/url?{params}"
 
     def is_admin(self, user_id: int) -> bool:

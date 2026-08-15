@@ -20,6 +20,14 @@ _ABORT = InlineKeyboardButton(
 _SKIP = InlineKeyboardButton(
     text="⏭ Пропустить", callback_data=AdminCB(action="skip").pack()
 )
+_BACK = InlineKeyboardButton(
+    text="⬅️ Назад", callback_data=AdminCB(action="back").pack()
+)
+
+
+def _nav(with_back: bool) -> list[list[InlineKeyboardButton]]:
+    """Нижние строки любой клавиатуры воронки: назад и выход."""
+    return [[_BACK, _ABORT]] if with_back else [[_ABORT]]
 
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
@@ -31,14 +39,14 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def abort_kb() -> InlineKeyboardMarkup:
+def abort_kb(*, with_back: bool = False) -> InlineKeyboardMarkup:
     """Обязательный шаг: выйти можно, пропустить — нет."""
-    return InlineKeyboardMarkup(inline_keyboard=[[_ABORT]])
+    return InlineKeyboardMarkup(inline_keyboard=_nav(with_back))
 
 
-def skip_kb() -> InlineKeyboardMarkup:
+def skip_kb(*, with_back: bool = True) -> InlineKeyboardMarkup:
     """Необязательный шаг."""
-    return InlineKeyboardMarkup(inline_keyboard=[[_SKIP], [_ABORT]])
+    return InlineKeyboardMarkup(inline_keyboard=[[_SKIP], *_nav(with_back)])
 
 
 def format_kb() -> InlineKeyboardMarkup:
@@ -51,7 +59,7 @@ def format_kb() -> InlineKeyboardMarkup:
     )
     builder.adjust(2)
     markup = builder.as_markup()
-    markup.inline_keyboard.append([_ABORT])
+    markup.inline_keyboard.extend(_nav(True))
     return markup
 
 
@@ -71,7 +79,7 @@ def max_players_kb(*, is_doubles: bool) -> InlineKeyboardMarkup:
     builder.adjust(len(presets))
     markup = builder.as_markup()
     markup.inline_keyboard.append([_SKIP])
-    markup.inline_keyboard.append([_ABORT])
+    markup.inline_keyboard.extend(_nav(True))
     return markup
 
 
@@ -85,7 +93,7 @@ def show_roster_kb() -> InlineKeyboardMarkup:
     )
     builder.adjust(1)
     markup = builder.as_markup()
-    markup.inline_keyboard.append([_ABORT])
+    markup.inline_keyboard.extend(_nav(True))
     return markup
 
 
@@ -96,7 +104,7 @@ def yes_no_kb(action: str) -> InlineKeyboardMarkup:
     builder.adjust(2)
     markup = builder.as_markup()
     markup.inline_keyboard.append([_SKIP])
-    markup.inline_keyboard.append([_ABORT])
+    markup.inline_keyboard.extend(_nav(True))
     return markup
 
 
@@ -107,7 +115,7 @@ def price_kb() -> InlineKeyboardMarkup:
     builder.adjust(1)
     markup = builder.as_markup()
     markup.inline_keyboard.append([_SKIP])
-    markup.inline_keyboard.append([_ABORT])
+    markup.inline_keyboard.extend(_nav(True))
     return markup
 
 
@@ -117,7 +125,7 @@ def visibility_kb() -> InlineKeyboardMarkup:
     builder.button(text="🙈 Скрытое", callback_data=AdminCB(action="vis", value="0"))
     builder.adjust(1)
     markup = builder.as_markup()
-    markup.inline_keyboard.append([_ABORT])
+    markup.inline_keyboard.extend(_nav(True))
     return markup
 
 
@@ -125,9 +133,70 @@ def preview_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📢 Опубликовать", callback_data=AdminCB(action="publish"))
     builder.button(text="💾 Сохранить черновиком", callback_data=AdminCB(action="draft"))
-    builder.button(text="✖️ Отменить создание", callback_data=AdminCB(action="abort"))
     builder.adjust(1)
-    return builder.as_markup()
+    markup = builder.as_markup()
+    markup.inline_keyboard.extend(_nav(True))
+    return markup
+
+
+def edit_menu_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
+    """Список полей мероприятия — по кнопке на каждое."""
+    from app.texts import FIELD_LABELS
+
+    builder = InlineKeyboardBuilder()
+    for field in (
+        "title", "date", "time_start", "time_end", "format",
+        "max_players", "rating_text", "is_rated", "price",
+        "is_public", "show_roster", "description",
+    ):
+        builder.button(
+            text=FIELD_LABELS[field],
+            callback_data=AdminCB(action="edf", id=event.id, page=page, value=field),
+        )
+    builder.adjust(2)
+    markup = builder.as_markup()
+    markup.inline_keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="⬅️ К мероприятию",
+                callback_data=AdminCB(action="tour", id=event.id, page=page).pack(),
+            )
+        ]
+    )
+    return markup
+
+
+def edit_value_kb(
+    event: Event,
+    *,
+    page: int,
+    options: list[tuple[str, str]] | None = None,
+    clearable: bool = False,
+) -> InlineKeyboardMarkup:
+    """Клавиатура шага правки: варианты, очистка и возврат в меню полей."""
+    builder = InlineKeyboardBuilder()
+    for label, value in options or []:
+        builder.button(text=label, callback_data=AdminCB(action="edset", value=value))
+    builder.adjust(2)
+    markup = builder.as_markup()
+    if clearable:
+        markup.inline_keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="🗑 Очистить поле",
+                    callback_data=AdminCB(action="edset", value="__clear__").pack(),
+                )
+            ]
+        )
+    markup.inline_keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=AdminCB(action="edit", id=event.id, page=page).pack(),
+            )
+        ]
+    )
+    return markup
 
 
 def admin_events_kb(
@@ -171,7 +240,11 @@ def admin_event_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="👥 Состав",
             callback_data=AdminCB(action="players", id=event.id, page=page).pack(),
-        )
+        ),
+        InlineKeyboardButton(
+            text="✏️ Изменить",
+            callback_data=AdminCB(action="edit", id=event.id, page=page).pack(),
+        ),
     )
 
     if event.status is EventStatus.DRAFT:

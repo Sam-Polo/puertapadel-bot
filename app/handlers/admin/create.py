@@ -91,6 +91,17 @@ async def _is_doubles(state: FSMContext) -> bool:
     return data.get("format") == EventFormat.DOUBLES.value
 
 
+async def _go_date(state: FSMContext) -> tuple[str, object]:
+    await state.set_state(NewEventSG.date)
+    # Первый шаг: возвращаться некуда, только выйти.
+    return texts.NEW_ASK_DATE, abort_kb()
+
+
+async def _go_time_start(state: FSMContext) -> tuple[str, object]:
+    await state.set_state(NewEventSG.time_start)
+    return texts.NEW_ASK_TIME_START, abort_kb(with_back=True)
+
+
 async def _go_time_end(state: FSMContext) -> tuple[str, object]:
     await state.set_state(NewEventSG.time_end)
     return texts.NEW_ASK_TIME_END, skip_kb()
@@ -98,7 +109,7 @@ async def _go_time_end(state: FSMContext) -> tuple[str, object]:
 
 async def _go_title(state: FSMContext) -> tuple[str, object]:
     await state.set_state(NewEventSG.title)
-    return texts.NEW_ASK_TITLE, abort_kb()
+    return texts.NEW_ASK_TITLE, abort_kb(with_back=True)
 
 
 async def _go_format(state: FSMContext) -> tuple[str, object]:
@@ -150,7 +161,27 @@ async def _go_preview(state: FSMContext) -> tuple[str, object]:
     return text, preview_kb()
 
 
-# Необязательные шаги: какое поле обнуляем и куда идём дальше.
+# Порядок шагов. Из него же выводится, куда ведёт «Назад»: воронка
+# линейная, так что отдельный стек истории не нужен.
+_STEPS = (
+    (NewEventSG.date, _go_date),
+    (NewEventSG.time_start, _go_time_start),
+    (NewEventSG.time_end, _go_time_end),
+    (NewEventSG.title, _go_title),
+    (NewEventSG.event_format, _go_format),
+    (NewEventSG.max_players, _go_max_players),
+    (NewEventSG.rating, _go_rating),
+    (NewEventSG.is_rated, _go_is_rated),
+    (NewEventSG.price, _go_price),
+    (NewEventSG.visibility, _go_visibility),
+    (NewEventSG.show_roster, _go_show_roster),
+    (NewEventSG.description, _go_description),
+    (NewEventSG.preview, _go_preview),
+)
+
+_STEP_INDEX = {step.state: index for index, (step, _) in enumerate(_STEPS)}
+
+# Необязательные шаги: какое поле обнуляем при пропуске.
 _SKIPPABLE: dict[str, str] = {
     NewEventSG.time_end.state: "time_end",
     NewEventSG.max_players.state: "max_players",
@@ -160,14 +191,11 @@ _SKIPPABLE: dict[str, str] = {
     NewEventSG.description.state: "description",
 }
 
-_NEXT_AFTER_SKIP = {
-    NewEventSG.time_end.state: _go_title,
-    NewEventSG.max_players.state: _go_rating,
-    NewEventSG.rating.state: _go_is_rated,
-    NewEventSG.is_rated.state: _go_price,
-    NewEventSG.price.state: _go_visibility,
-    NewEventSG.description.state: _go_preview,
-}
+
+async def _go_next(state: FSMContext, current: str) -> tuple[str, object]:
+    """Следующий шаг после указанного."""
+    _, view = _STEPS[_STEP_INDEX[current] + 1]
+    return await view(state)
 
 
 @router.callback_query(AdminCB.filter(F.action == "skip"))
@@ -180,7 +208,22 @@ async def on_skip(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.update_data({_SKIPPABLE[current]: None})
     await callback.answer("Пропущено")
-    text, markup = await _NEXT_AFTER_SKIP[current](state)
+    text, markup = await _go_next(state, current)
+    await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
+
+
+@router.callback_query(AdminCB.filter(F.action == "back"))
+async def on_back(callback: CallbackQuery, state: FSMContext) -> None:
+    """Шаг назад. Уже введённое сохраняется — его можно просто перезаписать."""
+    current = await state.get_state()
+    index = _STEP_INDEX.get(current or "")
+    if not index:  # None или 0 — возвращаться некуда
+        await callback.answer("Это первый шаг", show_alert=True)
+        return
+
+    await callback.answer()
+    _, view = _STEPS[index - 1]
+    text, markup = await view(state)
     await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
 
 
@@ -199,7 +242,7 @@ async def on_date(message: Message, state: FSMContext) -> None:
 
     await state.update_data(date=date.isoformat())
     await state.set_state(NewEventSG.time_start)
-    await message.answer(texts.NEW_ASK_TIME_START, reply_markup=abort_kb())
+    await message.answer(texts.NEW_ASK_TIME_START, reply_markup=abort_kb(with_back=True))
 
 
 # --- Шаг 2-3: время ---
@@ -209,7 +252,7 @@ async def on_date(message: Message, state: FSMContext) -> None:
 async def on_time_start(message: Message, state: FSMContext) -> None:
     time_start = parse_time(message.text or "")
     if time_start is None:
-        await message.answer(texts.NEW_BAD_TIME, reply_markup=abort_kb())
+        await message.answer(texts.NEW_BAD_TIME, reply_markup=abort_kb(with_back=True))
         return
 
     await state.update_data(time_start=time_start.isoformat())
@@ -236,7 +279,7 @@ async def on_time_end(message: Message, state: FSMContext) -> None:
 async def on_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not (3 <= len(title) <= 150):
-        await message.answer(texts.NEW_BAD_TITLE, reply_markup=abort_kb())
+        await message.answer(texts.NEW_BAD_TITLE, reply_markup=abort_kb(with_back=True))
         return
 
     await state.update_data(title=title)

@@ -31,6 +31,12 @@ class NewEventSG(StatesGroup):
     preview = State()
 
 
+class EditEventSG(StatesGroup):
+    """Правка одного поля мероприятия. Какого — лежит в data['field']."""
+
+    value = State()
+
+
 class SignupSG(StatesGroup):
     """Запись за двоих: ждём имя напарника."""
 
