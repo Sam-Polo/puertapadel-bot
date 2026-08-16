@@ -139,9 +139,11 @@ def _core_lines(event: Event) -> list[str]:
     lines = [
         f"<b>{q(event.title)}</b>",
         f"📅 {fmt_when(event)}",
+        # Локация у клуба одна и в карточке должна быть всегда. Пустой она
+        # бывает только у мероприятий, заведённых когда её ещё спрашивали
+        # отдельным шагом и разрешали пропустить.
+        f"📍 {q(event.location or get_settings().location_name)}",
     ]
-    if event.location:
-        lines.append(f"📍 {q(event.location)}")
     if event.rating_text:
         lines.append(f"1️⃣ Рейтинг {q(event.rating_text)}")
     if event.is_rated is not None:
