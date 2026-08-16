@@ -23,11 +23,31 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 GROUP_TYPES = {"group", "supergroup"}
 
 
-def _chat_id_text(chat_id: int, thread_id: int | None) -> str:
-    thread = (
-        f"<code>ANNOUNCE_THREAD_ID={thread_id}</code>\n" if thread_id is not None else ""
+def _topic_id(message: Message) -> int | None:
+    """Номер темы, если сообщение написано внутри неё.
+
+    Проверяем именно is_topic_message: message_thread_id заполняется ещё и
+    у ответов в обычных группах, и такой номер темой не является. В General
+    его нет вовсе — Telegram считает общую ленту «не темой».
+    """
+    if not message.is_topic_message:
+        return None
+    return message.message_thread_id
+
+
+def _chat_id_text(message: Message) -> str:
+    thread_id = _topic_id(message)
+    if thread_id is None:
+        return texts.CHAT_ID_NO_TOPIC.format(chat_id=message.chat.id)
+
+    topic = (
+        message.reply_to_message.forum_topic_created.name
+        if message.reply_to_message and message.reply_to_message.forum_topic_created
+        else "текущая"
     )
-    return texts.CHAT_ID_INFO.format(chat_id=chat_id, thread=thread)
+    return texts.CHAT_ID_IN_TOPIC.format(
+        topic=topic, chat_id=message.chat.id, thread_id=thread_id
+    )
 
 
 @router.message(Command("chatid"))
@@ -36,7 +56,14 @@ async def cmd_chat_id(message: Message) -> None:
     settings = get_settings()
     if message.from_user is None or not settings.is_admin(message.from_user.id):
         return
-    await message.reply(_chat_id_text(message.chat.id, message.message_thread_id))
+    logger.info(
+        "/chatid в чате %s: thread=%s, is_topic=%s, forum=%s",
+        message.chat.id,
+        message.message_thread_id,
+        message.is_topic_message,
+        message.chat.is_forum,
+    )
+    await message.reply(_chat_id_text(message))
 
 
 @router.my_chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> MEMBER))
@@ -46,9 +73,11 @@ async def on_added_to_chat(event: ChatMemberUpdated, bot: Bot) -> None:
         return
 
     settings = get_settings()
+    # Тему тут узнать неоткуда: добавление в чат к теме не привязано,
+    # поэтому подсказываем общий id и как получить номер темы.
     text = (
         f"🤖 Меня добавили в чат «{event.chat.title}».\n\n"
-        + _chat_id_text(event.chat.id, None)
+        + texts.CHAT_ID_NO_TOPIC.format(chat_id=event.chat.id)
     )
     logger.info("Бот добавлен в чат %s (%s)", event.chat.id, event.chat.title)
     for admin_id in settings.admin_ids:
