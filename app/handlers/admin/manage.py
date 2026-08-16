@@ -221,12 +221,18 @@ async def on_status(
 async def on_publish_existing(
     callback: CallbackQuery, callback_data: AdminCB, session: AsyncSession
 ) -> None:
-    """Публикация черновика: открываем набор и шлём анонс."""
+    """Публикация анонса.
+
+    Черновик при этом открывает набор, а у остальных статус не трогаем:
+    иначе публикация анонса у мероприятия с закрытым набором молча
+    открыла бы запись обратно.
+    """
     event = await _load(callback, session, callback_data.id)
     if event is None:
         return
 
-    await events_service.set_status(session, event, EventStatus.OPEN)
+    if event.status is EventStatus.DRAFT:
+        await events_service.set_status(session, event, EventStatus.OPEN)
 
     if event.announce_message_id is not None:
         await callback.answer(texts.ANNOUNCE_ALREADY)
