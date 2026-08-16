@@ -234,22 +234,25 @@ async def on_publish_existing(
     if event.status is EventStatus.DRAFT:
         await events_service.set_status(session, event, EventStatus.OPEN)
 
-    if event.announce_message_id is not None:
-        await callback.answer(texts.ANNOUNCE_ALREADY)
-    elif not event.is_public:
+    if not event.is_public:
         await callback.answer(texts.ANNOUNCE_HIDDEN, show_alert=True)
     elif callback.bot is not None:
+        # Если анонс уже был, публикуем заново вместо него: прежнее
+        # сообщение или удалено руками, или его надо заменить свежим.
+        again = event.announce_message_id is not None
         try:
-            published = await announce.publish(callback.bot, session, event)
+            published = await announce.republish(callback.bot, session, event)
         except announce.AnnounceError as error:
             await callback.answer(
                 texts.ANNOUNCE_FAILED.format(error=error), show_alert=True
             )
         else:
-            await callback.answer(
-                texts.ANNOUNCE_OK if published else texts.ANNOUNCE_NOT_CONFIGURED,
-                show_alert=not published,
-            )
+            if not published:
+                await callback.answer(texts.ANNOUNCE_NOT_CONFIGURED, show_alert=True)
+            else:
+                await callback.answer(
+                    texts.ANNOUNCE_AGAIN_OK if again else texts.ANNOUNCE_OK
+                )
 
     await show_event(callback, session, event, page=callback_data.page)
 

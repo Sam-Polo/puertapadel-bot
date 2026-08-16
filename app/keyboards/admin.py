@@ -269,17 +269,14 @@ def admin_event_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
             )
         )
 
-    # Анонса может не быть и у давно созданного мероприятия: например, его
-    # завели скрытым, а потом сделали публичным. Кнопка нужна всегда, пока
-    # анонс не опубликован.
-    if (
-        event.is_public
-        and event.announce_message_id is None
-        and event.status is not EventStatus.DRAFT
-    ):
+    # Анонса может не быть и у давно созданного мероприятия (завели скрытым,
+    # потом открыли), а опубликованный могли удалить из чата руками —
+    # поэтому кнопка нужна в обоих случаях, только с разной подписью.
+    if event.is_public and event.status is not EventStatus.DRAFT:
+        again = event.announce_message_id is not None
         builder.row(
             InlineKeyboardButton(
-                text="📢 Опубликовать анонс",
+                text="📢 Опубликовать заново" if again else "📢 Опубликовать анонс",
                 callback_data=AdminCB(
                     action="publish_existing", id=event.id, page=page
                 ).pack(),

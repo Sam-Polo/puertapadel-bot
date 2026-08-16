@@ -246,7 +246,7 @@ ANNOUNCE_NOT_CONFIGURED = (
 ANNOUNCE_HIDDEN = "Скрытое мероприятие в чат не анонсируется. Раздайте ссылку вручную."
 ANNOUNCE_FAILED = "⚠️ Не удалось опубликовать анонс: {error}"
 ANNOUNCE_OK = "📢 Анонс опубликован."
-ANNOUNCE_ALREADY = "Анонс уже опубликован."
+ANNOUNCE_AGAIN_OK = "📢 Анонс опубликован заново."
 
 ADMIN_EVENTS_EMPTY = "Мероприятий пока нет. Создайте первое 👇"
 ADMIN_PARTICIPANTS_EMPTY = "На мероприятие пока никто не записался."

@@ -120,6 +120,36 @@ async def refresh(bot: Bot, session: AsyncSession, event: Event) -> None:
     except TelegramAPIError as error:
         # "message is not modified" — тоже сюда, и это нормально.
         logger.info("Анонс мероприятия %s не обновлён: %s", event.id, error)
+        if "not found" in str(error):
+            # Сообщение удалили в чате руками. Забываем координаты, чтобы
+            # админ увидел кнопку публикации и мог выложить анонс заново.
+            logger.info("Анонс мероприятия %s удалён из чата — забываю", event.id)
+            await forget(session, event)
+
+
+async def forget(session: AsyncSession, event: Event) -> None:
+    """Забывает координаты анонса — считаем, что сообщения больше нет."""
+    event.announce_chat_id = None
+    event.announce_message_id = None
+    await session.commit()
+
+
+async def republish(bot: Bot, session: AsyncSession, event: Event) -> bool:
+    """Публикует анонс заново вместо прежнего.
+
+    Старое сообщение пытаемся убрать, но неудача здесь ожидаема: чаще
+    всего его уже удалили руками — ровно поэтому и потребовалась
+    повторная публикация. В любом случае забываем координаты, иначе
+    publish() решит, что анонс на месте, и ничего не сделает.
+    """
+    if event.announce_message_id is not None and event.announce_chat_id is not None:
+        with contextlib.suppress(TelegramAPIError):
+            await bot.delete_message(
+                chat_id=event.announce_chat_id, message_id=event.announce_message_id
+            )
+        await forget(session, event)
+
+    return await publish(bot, session, event)
 
 
 async def remove(bot: Bot, session: AsyncSession, event: Event) -> bool:
