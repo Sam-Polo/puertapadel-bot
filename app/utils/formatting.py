@@ -273,6 +273,24 @@ def render_for_player(
     return "\n".join(lines)
 
 
+def render_share(event: Event) -> str:
+    """Сообщение, которым участник зовёт знакомых.
+
+    Уходит через inline-режим, то есть отправляет его сам пользователь, но
+    текст готовит бот — поэтому здесь доступна разметка и ссылка живёт
+    прямо в словах, как в анонсе.
+    """
+    settings = get_settings()
+    lines = [f"🎾 <b>{q(event.title)}</b>", f"📅 {fmt_when(event)}"]
+    if event.location:
+        lines.append(f"📍 {q(event.location)}")
+    if event.price is not None:
+        lines.append(f"💰 {fmt_price(event.price)}")
+    lines.append("")
+    lines.append(f'👉 <a href="{settings.deep_link(event.id)}">Записаться в боте</a>')
+    return "\n".join(lines)
+
+
 def render_for_admin(event: Event, *, taken: int, paid: int) -> str:
     """Карточка мероприятия в админке — с видимостью и служебными полями."""
     lines = _core_lines(event, taken)

@@ -59,10 +59,6 @@ _SIGNUP_ERRORS = {
 }
 
 
-def share_text(event: Event) -> str:
-    return texts.SHARE_TEXT.format(title=event.title, when=fmt_when(event))
-
-
 async def show_events_list(
     callback: CallbackQuery, session: AsyncSession, *, page: int = 0
 ) -> None:
@@ -165,7 +161,7 @@ async def show_event_card(
             page=page,
             src=src,
             is_full=_is_full(event, taken),
-            share_text=share_text(event),
+            with_share=True,
         ),
     )
 
@@ -196,7 +192,7 @@ async def send_event_card(
             page=0,
             src=src,
             is_full=_is_full(event, taken),
-            share_text=share_text(event),
+            with_share=True,
         ),
         disable_web_page_preview=True,
     )
@@ -408,7 +404,7 @@ async def do_signup(
             title=q(event.title), when=fmt_when(event), partner=q(partner_name)
         )
         + (texts.SIGNUP_SHARE_HINT if not _is_full(event, taken) else ""),
-        after_signup_kb(event, share_text(event), is_full=_is_full(event, taken)),
+        after_signup_kb(event, is_full=_is_full(event, taken)),
     )
     logger.info(
         "Участник %s записан на мероприятие %s (мест: %s, занято %s)",

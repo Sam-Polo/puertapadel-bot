@@ -47,8 +47,10 @@ def setup_dispatcher() -> Dispatcher:
         observer.outer_middleware(UserMiddleware())
         observer.outer_middleware(RegistrationGateMiddleware())
 
-    # my_chat_member обрабатывается без пользовательского контекста.
+    # my_chat_member и inline_query обрабатываются без пользовательского
+    # контекста: там не нужны ни регистрация, ни антиспам, только БД.
     dispatcher.my_chat_member.outer_middleware(DbSessionMiddleware())
+    dispatcher.inline_query.outer_middleware(DbSessionMiddleware())
 
     dispatcher.include_router(build_router())
     return dispatcher

@@ -119,7 +119,7 @@ def event_card_kb(
     page: int,
     src: str,
     is_full: bool,
-    share_text: str | None = None,
+    with_share: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -142,9 +142,9 @@ def event_card_kb(
 
     # Позвать знакомых можно с любой карточки, не только сразу после записи,
     # но только пока есть куда звать: иначе друг придёт на «мест нет».
-    if share_text is not None and event.accepts_signups and not is_full:
+    if with_share and event.accepts_signups and not is_full:
         markup.inline_keyboard.insert(
-            len(markup.inline_keyboard) - 1, [share_button(event, share_text)]
+            len(markup.inline_keyboard) - 1, [share_button(event)]
         )
     return markup
 
@@ -163,11 +163,15 @@ def signup_confirm_kb(event: Event, *, page: int, src: str) -> InlineKeyboardMar
     return builder.as_markup()
 
 
-def share_button(event: Event, share_text: str) -> InlineKeyboardButton:
-    """Кнопка «переслать другу» — Telegram сам предложит выбрать чат."""
+def share_button(event: Event) -> InlineKeyboardButton:
+    """Кнопка «отправить другу».
+
+    switch_inline_query открывает выбор чата и отправляет туда сообщение,
+    текст которого готовит бот, — поэтому ссылка получается словами, а не
+    голой строкой. Требует включённого inline-режима у бота.
+    """
     return InlineKeyboardButton(
-        text="📤 Отправить ссылку другу",
-        url=get_settings().share_link(event.id, share_text),
+        text="📤 Отправить другу", switch_inline_query=f"e{event.id}"
     )
 
 
@@ -193,16 +197,14 @@ def profile_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def after_signup_kb(
-    event: Event, share_text: str, *, is_full: bool = False
-) -> InlineKeyboardMarkup:
+def after_signup_kb(event: Event, *, is_full: bool = False) -> InlineKeyboardMarkup:
     """Сразу после записи первым делом предлагаем позвать знакомых.
 
     Если участник занял последнее место, звать уже некуда.
     """
     builder = InlineKeyboardBuilder()
     if not is_full:
-        builder.row(share_button(event, share_text))
+        builder.row(share_button(event))
     builder.row(
         InlineKeyboardButton(text="📋 Мои записи", callback_data=MenuCB(action="my").pack())
     )

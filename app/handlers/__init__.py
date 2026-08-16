@@ -13,7 +13,7 @@
 from aiogram import Router
 
 from app.handlers import admin as admin_handlers
-from app.handlers import common, events, group, registration
+from app.handlers import common, events, group, inline, registration
 
 
 def build_router() -> Router:
@@ -23,6 +23,7 @@ def build_router() -> Router:
     router.include_router(admin_handlers.router)
     router.include_router(registration.router)
     router.include_router(events.router)
+    router.include_router(inline.router)
     router.include_router(common.fallback_router)
     return router
 
