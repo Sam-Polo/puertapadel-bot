@@ -50,11 +50,34 @@ def _chat_id_text(message: Message) -> str:
     )
 
 
+def _may_ask_chat_id(message: Message) -> bool:
+    """Кому отвечаем на /chatid.
+
+    Обычно — администраторам бота из .env. Но админ группы может писать
+    анонимно, «от имени группы»: тогда Telegram подменяет отправителя на
+    служебного @GroupAnonymousBot, и сверять его с ADMIN_IDS бессмысленно.
+    В этом случае опираемся на sender_chat: писать от имени группы могут
+    только её администраторы.
+    """
+    if message.sender_chat is not None:
+        return message.sender_chat.id == message.chat.id
+
+    settings = get_settings()
+    return message.from_user is not None and settings.is_admin(message.from_user.id)
+
+
 @router.message(Command("chatid"))
 async def cmd_chat_id(message: Message) -> None:
-    """Отвечает только администраторам бота, чтобы не мусорить в общем чате."""
-    settings = get_settings()
-    if message.from_user is None or not settings.is_admin(message.from_user.id):
+    """Отвечает только администраторам, чтобы не мусорить в общем чате."""
+    if not _may_ask_chat_id(message):
+        # Молчим в чат, но оставляем след: иначе «бот не отвечает»
+        # невозможно отличить от «бот не получил сообщение».
+        logger.info(
+            "/chatid отклонён: chat=%s from=%s sender_chat=%s",
+            message.chat.id,
+            message.from_user.id if message.from_user else None,
+            message.sender_chat.id if message.sender_chat else None,
+        )
         return
     logger.info(
         "/chatid в чате %s: thread=%s, is_topic=%s, forum=%s",
