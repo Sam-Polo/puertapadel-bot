@@ -20,11 +20,12 @@ from app.utils.dates import fmt_date_short, fmt_time
 
 # Значок статуса совпадает с тем, что стоит в списках (STATUS_BADGE):
 # зелёный — можно записаться, красный — нельзя. Один язык символов.
+# Слово «Статус» не пишем: значок и текст говорят сами за себя.
 STATUS_LABEL = {
-    EventStatus.DRAFT: "📝 Статус: Черновик",
-    EventStatus.OPEN: "🟢 Статус: Идёт набор участников",
-    EventStatus.CLOSED: "🔴 Статус: Набор участников закончен",
-    EventStatus.CANCELLED: "🚫 Статус: Мероприятие отменено",
+    EventStatus.DRAFT: "📝 Черновик",
+    EventStatus.OPEN: "🟢 Идёт набор участников",
+    EventStatus.CLOSED: "🔴 Набор участников закончен",
+    EventStatus.CANCELLED: "🚫 Мероприятие отменено",
 }
 
 # Короткая подпись статуса — для кнопок и списков.
@@ -114,7 +115,7 @@ def status_line(event: Event, taken: int | None = None) -> str:
         and event.status is EventStatus.OPEN
         and is_full(event, taken)
     ):
-        return "🔴 Статус: Мест нет"
+        return "🔴 Мест нет"
     return STATUS_LABEL[event.status]
 
 
@@ -137,21 +138,21 @@ def _core_lines(event: Event) -> list[str]:
     """
     lines = [
         f"<b>{q(event.title)}</b>",
-        format_label(event),
+        f"📅 {fmt_when(event)}",
     ]
+    if event.location:
+        lines.append(f"📍 {q(event.location)}")
     if event.rating_text:
         lines.append(f"1️⃣ Рейтинг {q(event.rating_text)}")
-    if event.location:
-        lines.append(f"📍 <b>Локация:</b> {q(event.location)}")
     if event.is_rated is not None:
         lines.append("📈 Рейтинговое" if event.is_rated else "📈 Не рейтинговое")
+    lines.append(format_label(event))
     if event.max_players is not None:
         capacity = (
             f"{event.max_pairs} пар" if event.is_doubles else str(event.max_players)
         )
         lines.append(f"🎾 Количество мест: {capacity}")
-    lines.append(f"💰 <b>Стоимость:</b> {fmt_price(event.price)}")
-    lines.append(f"📅 Когда: {fmt_when(event)}")
+    lines.append(f"💰 Стоимость: {fmt_price(event.price)}")
     return lines
 
 
@@ -163,7 +164,6 @@ def _with_description(lines: list[str], event: Event) -> list[str]:
     скроллом на узких экранах.
     """
     if event.description:
-        lines.append("")
         lines.append("<b>Регламент:</b>")
         lines.append(f"<blockquote>{q(event.description)}</blockquote>")
     return lines
@@ -295,18 +295,29 @@ def render_share(event: Event) -> str:
     return "\n".join(lines)
 
 
-def render_for_admin(event: Event, *, taken: int, paid: int) -> str:
-    """Карточка мероприятия в админке — с видимостью и служебными полями."""
-    lines = _core_lines(event)
+def _admin_only_lines(event: Event, *, taken: int | None = None, paid: int = 0) -> list[str]:
+    """Поля, которые видит только админ, — в анонс они не идут.
+
+    Собраны отдельным блоком под пометкой: иначе непонятно, что из
+    показанного увидят участники, а что нет.
+    """
+    lines = ["", "⚙️ <i>Только для вас, в анонс не идёт:</i>"]
     lines.append("✅ Видно всем" if event.is_public else "🙈 Скрытое (только по ссылке)")
     lines.append(
         "👁 Состав виден участникам" if event.show_roster else "🙈 Состав скрыт от участников"
     )
-    lines.append(f"👥 Занято: {fmt_capacity(event, taken)} • оплатили: {paid}")
+    if taken is not None:
+        lines.append(f"👥 Занято: {fmt_capacity(event, taken)} • оплатили: {paid}")
+    return lines
+
+
+def render_for_admin(event: Event, *, taken: int, paid: int) -> str:
+    """Карточка мероприятия в админке — с видимостью и служебными полями."""
+    lines = _core_lines(event)
     lines.append(status_line(event, taken))
     lines = _with_description(lines, event)
+    lines.extend(_admin_only_lines(event, taken=taken, paid=paid))
     if event.announce_message_id:
-        lines.append("")
         lines.append("📢 Анонс опубликован")
     return "\n".join(lines)
 
@@ -314,12 +325,10 @@ def render_for_admin(event: Event, *, taken: int, paid: int) -> str:
 def render_preview(event: Event) -> str:
     """Предпросмотр перед публикацией — то же, что увидит админ в карточке."""
     lines = _core_lines(event)
-    lines.append("✅ Видно всем" if event.is_public else "🙈 Скрытое (только по ссылке)")
-    lines.append(
-        "👁 Состав виден участникам" if event.show_roster else "🙈 Состав скрыт от участников"
-    )
     lines.append(status_line(event))
-    return "\n".join(_with_description(lines, event))
+    lines = _with_description(lines, event)
+    lines.extend(_admin_only_lines(event))
+    return "\n".join(lines)
 
 
 def event_button_label(event: Event, *, taken: int | None = None) -> str:
