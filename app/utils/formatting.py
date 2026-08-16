@@ -18,10 +18,12 @@ from app.config import get_settings
 from app.db.models import Event, EventStatus, Registration, User
 from app.utils.dates import fmt_date_short, fmt_time
 
+# Значок статуса совпадает с тем, что стоит в списках (STATUS_BADGE):
+# зелёный — можно записаться, красный — нельзя. Один язык символов.
 STATUS_LABEL = {
-    EventStatus.DRAFT: "📝 Черновик",
-    EventStatus.OPEN: "🎮 Статус: Идёт набор участников",
-    EventStatus.CLOSED: "🎮 Статус: Набор участников закончен",
+    EventStatus.DRAFT: "📝 Статус: Черновик",
+    EventStatus.OPEN: "🟢 Статус: Идёт набор участников",
+    EventStatus.CLOSED: "🔴 Статус: Набор участников закончен",
     EventStatus.CANCELLED: "🚫 Статус: Мероприятие отменено",
 }
 
@@ -126,11 +128,15 @@ def status_badge(event: Event, taken: int | None = None) -> str:
     return STATUS_BADGE[event.status]
 
 
-def _core_lines(event: Event, taken: int | None = None) -> list[str]:
-    """Строки, общие для всех вариантов карточки."""
+def _core_lines(event: Event) -> list[str]:
+    """Строки, общие для всех вариантов карточки.
+
+    Статуса здесь нет: он идёт последним полем, уже после занятости, —
+    так карточка читается как «что за мероприятие» → «можно ли попасть».
+    Добавляет его каждый рендер сам, через status_line().
+    """
     lines = [
         f"<b>{q(event.title)}</b>",
-        status_line(event, taken),
         format_label(event),
     ]
     if event.rating_text:
@@ -145,7 +151,7 @@ def _core_lines(event: Event, taken: int | None = None) -> list[str]:
         )
         lines.append(f"🎾 Количество мест: {capacity}")
     lines.append(f"💰 <b>Стоимость:</b> {fmt_price(event.price)}")
-    lines.append(f"📅 <b>Когда:</b> {fmt_when(event)}")
+    lines.append(f"📅 Когда: {fmt_when(event)}")
     return lines
 
 
@@ -176,8 +182,9 @@ def render_announcement(
     этого запаса — поэтому список при необходимости подрезаем.
     """
     settings = get_settings()
-    lines = _core_lines(event, taken)
+    lines = _core_lines(event)
     lines.append(f"👥 Записано: {fmt_capacity(event, taken)}")
+    lines.append(status_line(event, taken))
     lines = _with_description(lines, event)
 
     footer = ["", f'👉 <a href="{settings.deep_link(event.id)}">Записаться в боте</a>']
@@ -237,7 +244,7 @@ def render_for_player(
     roster: list[tuple[User, Registration]] | None = None,
 ) -> str:
     """Карточка внутри бота: + занятость, состав и мой статус."""
-    lines = _core_lines(event, taken)
+    lines = _core_lines(event)
 
     if event.max_players is None:
         lines.append(f"👥 Записано: {fmt_capacity(event, taken)}")
@@ -251,6 +258,7 @@ def render_for_player(
     else:
         lines.append(f"👥 Записано: {fmt_capacity(event, taken)}")
 
+    lines.append(status_line(event, taken))
     lines = _with_description(lines, event)
 
     if event.show_roster and roster:
@@ -289,12 +297,13 @@ def render_share(event: Event) -> str:
 
 def render_for_admin(event: Event, *, taken: int, paid: int) -> str:
     """Карточка мероприятия в админке — с видимостью и служебными полями."""
-    lines = _core_lines(event, taken)
+    lines = _core_lines(event)
     lines.append("✅ Видно всем" if event.is_public else "🙈 Скрытое (только по ссылке)")
     lines.append(
         "👁 Состав виден участникам" if event.show_roster else "🙈 Состав скрыт от участников"
     )
     lines.append(f"👥 Занято: {fmt_capacity(event, taken)} • оплатили: {paid}")
+    lines.append(status_line(event, taken))
     lines = _with_description(lines, event)
     if event.announce_message_id:
         lines.append("")
@@ -309,6 +318,7 @@ def render_preview(event: Event) -> str:
     lines.append(
         "👁 Состав виден участникам" if event.show_roster else "🙈 Состав скрыт от участников"
     )
+    lines.append(status_line(event))
     return "\n".join(_with_description(lines, event))
 
 
