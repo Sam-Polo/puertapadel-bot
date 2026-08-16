@@ -96,7 +96,9 @@ class User(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    registrations: Mapped[list[Registration]] = relationship(back_populates="user")
+    registrations: Mapped[list[Registration]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @property
     def is_registered(self) -> bool:
@@ -151,9 +153,9 @@ class Event(Base):
     # None = строку про рейтинговость в карточке не показываем вовсе.
     is_rated: Mapped[bool | None] = mapped_column(Boolean)
 
-    # Стоимость участия. В анонс не идёт — показывается участнику перед
-    # подтверждением записи и админу в админке.
-    price: Mapped[int | None] = mapped_column(Integer)
+    # Стоимость участия — произвольный текст, а не число: организатор
+    # пишет туда и условия («1100 ₽, для новичков 900»), а не только сумму.
+    price: Mapped[str | None] = mapped_column(String(256))
 
     # Произвольный текст в конце карточки, отделённый пустой строкой.
     description: Mapped[str | None] = mapped_column(Text)
@@ -182,7 +184,12 @@ class Event(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    registrations: Mapped[list[Registration]] = relationship(back_populates="event")
+    # passive_deletes: удаление записей отдаём каскаду БД (ondelete=CASCADE).
+    # Без этого SQLAlchemy пытается сначала обнулить registrations.event_id
+    # и падает на NOT NULL.
+    registrations: Mapped[list[Registration]] = relationship(
+        back_populates="event", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @property
     def starts_at(self) -> dt.datetime:

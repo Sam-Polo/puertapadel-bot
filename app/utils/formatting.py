@@ -67,12 +67,8 @@ def fmt_level(level: float | None) -> str:
     return f"{level:.2f}"
 
 
-def fmt_price(price: int | None) -> str:
-    if price is None:
-        return "не указана"
-    if price == 0:
-        return "бесплатно"
-    return f"{price:,} ₽".replace(",", " ")
+def fmt_price(price: str | None) -> str:
+    return q(price) if price else "не указана"
 
 
 def fmt_when(event: Event) -> str:
@@ -133,7 +129,7 @@ def status_badge(event: Event, taken: int | None = None) -> str:
 def _core_lines(event: Event, taken: int | None = None) -> list[str]:
     """Строки, общие для всех вариантов карточки."""
     lines = [
-        f"❗️ <b>{q(event.title)}</b>",
+        f"<b>{q(event.title)}</b>",
         status_line(event, taken),
         format_label(event),
     ]

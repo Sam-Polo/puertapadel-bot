@@ -53,7 +53,7 @@ MAX_PLAYERS_MIN = 2
 MAX_PLAYERS_MAX = 64
 MAX_PAIRS_MIN = 1
 MAX_PAIRS_MAX = 32
-PRICE_MAX = 1_000_000
+PRICE_MAX_LENGTH = 256
 DESCRIPTION_MAX = 2000
 
 
@@ -366,22 +366,14 @@ async def on_is_rated(
 # --- Шаг 9: стоимость ---
 
 
-@router.callback_query(NewEventSG.price, AdminCB.filter(F.action == "price"))
-async def on_price_free(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    await state.update_data(price=0)
-    text, markup = await _go_visibility(state)
-    await edit_or_send(callback, text, markup)  # type: ignore[arg-type]
-
-
 @router.message(NewEventSG.price, F.text)
 async def on_price(message: Message, state: FSMContext) -> None:
-    raw = (message.text or "").strip().replace(" ", "")
-    if not raw.isdigit() or int(raw) > PRICE_MAX:
+    price = (message.text or "").strip()
+    if len(price) > PRICE_MAX_LENGTH:
         await message.answer(texts.NEW_BAD_PRICE, reply_markup=price_kb())
         return
 
-    await state.update_data(price=int(raw))
+    await state.update_data(price=price or None)
     text, markup = await _go_visibility(state)
     await message.answer(text, reply_markup=markup)  # type: ignore[arg-type]
 

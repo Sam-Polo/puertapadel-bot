@@ -267,17 +267,17 @@ async def set_status(
     return event
 
 
-async def cancel_event(session: AsyncSession, event: Event) -> list[int]:
-    """Отменяет мероприятие и все записи. Возвращает id тех, кого уведомить."""
+async def delete_event(session: AsyncSession, event: Event) -> list[int]:
+    """Удаляет мероприятие вместе с записями.
+
+    Возвращает id тех, кого надо уведомить, — собрать их нужно до удаления,
+    после строк уже не будет. Сами записи уносит каскад по внешнему ключу.
+    """
     async with _locks[event.id]:
         await session.commit()  # см. комментарий в signup()
-        await session.refresh(event)
         rows = await participants(session, event.id)
         user_ids = [user.id for user, _ in rows]
-        for _, registration in rows:
-            registration.status = RegistrationStatus.CANCELLED
-            registration.cancelled_at = _utcnow()
-        event.status = EventStatus.CANCELLED
+        await session.delete(event)
         await session.commit()
         return user_ids
 

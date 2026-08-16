@@ -60,8 +60,6 @@ def _options(field: str, event: Event) -> list[tuple[str, str]]:
         presets = MAX_PAIRS_PRESETS if event.is_doubles else MAX_PLAYERS_PRESETS
         suffix = " пар" if event.is_doubles else ""
         return [(f"{value}{suffix}", str(value)) for value in presets]
-    if field == "price":
-        return [("🆓 Бесплатно", "0")]
     return []
 
 
@@ -181,10 +179,9 @@ async def _apply(
         event.max_players = seats
 
     elif field == "price":
-        cleaned = raw.replace(" ", "")
-        if not cleaned.isdigit() or int(cleaned) > 1_000_000:
+        if len(raw) > 256:
             return texts.NEW_BAD_PRICE
-        event.price = int(cleaned)
+        event.price = raw.strip() or None
 
     elif field == "rating_text":
         event.rating_text = raw.strip()[:64] or None

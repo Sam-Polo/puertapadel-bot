@@ -16,7 +16,7 @@ from app.keyboards.admin import (
     admin_events_kb,
     admin_participants_kb,
     back_to_admin_kb,
-    confirm_cancel_event_kb,
+    confirm_delete_event_kb,
 )
 from app.keyboards.callbacks import AdminCB
 from app.services import announce
@@ -249,7 +249,7 @@ async def on_publish_existing(
 
 
 @router.callback_query(AdminCB.filter(F.action == "cancel"))
-async def on_cancel_ask(
+async def on_delete_ask(
     callback: CallbackQuery, callback_data: AdminCB, session: AsyncSession
 ) -> None:
     event = await _load(callback, session, callback_data.id)
@@ -260,48 +260,52 @@ async def on_cancel_ask(
     taken = await events_service.seats_taken(session, event.id)
     await edit_or_send(
         callback,
-        texts.CONFIRM_CANCEL_EVENT.format(title=q(event.title), taken=taken),
-        confirm_cancel_event_kb(event, page=callback_data.page),
+        texts.CONFIRM_DELETE_EVENT.format(title=q(event.title), taken=taken),
+        confirm_delete_event_kb(event, page=callback_data.page),
     )
 
 
 @router.callback_query(AdminCB.filter(F.action == "cancel_ok"))
-async def on_cancel_confirm(
+async def on_delete_confirm(
     callback: CallbackQuery, callback_data: AdminCB, session: AsyncSession, user: User
 ) -> None:
     event = await _load(callback, session, callback_data.id)
     if event is None:
         return
 
-    user_ids = await events_service.cancel_event(session, event)
+    # Всё, что нужно для уведомлений и правки чата, забираем до удаления:
+    # после него объекта уже не будет.
+    title = q(event.title)
+    when = fmt_when(event)
+    event_id = event.id
 
     sent = 0
     removed = False
     if callback.bot is not None:
-        if user_ids:
-            sent = await announce.notify_users(
-                callback.bot,
-                user_ids,
-                texts.NOTIFY_PLAYER_EVENT_CANCELLED.format(
-                    title=q(event.title), when=fmt_when(event)
-                ),
-            )
-        # Отменённого мероприятия в чате быть не должно. Если удалить не
-        # дали — хотя бы перепишем сообщение на «отменено», чтобы туда
-        # никто не записывался.
         removed = await announce.remove(callback.bot, session, event)
         if not removed:
+            # Удалить сообщение не дали — хотя бы перепишем его, иначе в
+            # чате останется приглашение на несуществующее мероприятие.
             await announce.refresh(callback.bot, session, event)
 
+    user_ids = await events_service.delete_event(session, event)
+    if callback.bot is not None and user_ids:
+        sent = await announce.notify_users(
+            callback.bot,
+            user_ids,
+            texts.NOTIFY_PLAYER_EVENT_CANCELLED.format(title=title, when=when),
+        )
+
     logger.info(
-        "Админ %s отменил мероприятие %s, уведомлено %s участников, анонс %s",
-        user.id, event.id, sent, "удалён" if removed else "помечен отменённым",
+        "Админ %s удалил мероприятие %s, уведомлено %s участников, анонс %s",
+        user.id, event_id, sent, "удалён" if removed else "не удалён",
     )
     await callback.answer(
-        texts.EVENT_CANCELLED_OK.format(
+        texts.EVENT_DELETED_OK.format(
             sent=sent,
             announce=texts.ANNOUNCE_REMOVED if removed else texts.ANNOUNCE_MARKED,
         ),
         show_alert=True,
     )
-    await show_event(callback, session, event, page=callback_data.page)
+    # Возвращаться в карточку больше некуда — показываем список.
+    await show_events(callback, session, page=callback_data.page)

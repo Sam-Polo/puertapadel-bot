@@ -109,14 +109,8 @@ def yes_no_kb(action: str) -> InlineKeyboardMarkup:
 
 
 def price_kb() -> InlineKeyboardMarkup:
-    """«Бесплатно» и «пропустить» — разные вещи: 0 ₽ против «не указано»."""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🆓 Бесплатно", callback_data=AdminCB(action="price", value="0"))
-    builder.adjust(1)
-    markup = builder.as_markup()
-    markup.inline_keyboard.append([_SKIP])
-    markup.inline_keyboard.extend(_nav(True))
-    return markup
+    """Стоимость пишется целиком вручную — готовых вариантов тут нет."""
+    return InlineKeyboardMarkup(inline_keyboard=[[_SKIP], *_nav(True)])
 
 
 def visibility_kb() -> InlineKeyboardMarkup:
@@ -275,13 +269,12 @@ def admin_event_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
             )
         )
 
-    if event.status is not EventStatus.CANCELLED:
-        builder.row(
-            InlineKeyboardButton(
-                text="🚫 Отменить мероприятие",
-                callback_data=AdminCB(action="cancel", id=event.id, page=page).pack(),
-            )
+    builder.row(
+        InlineKeyboardButton(
+            text="🗑 Удалить мероприятие",
+            callback_data=AdminCB(action="cancel", id=event.id, page=page).pack(),
         )
+    )
 
     builder.row(
         InlineKeyboardButton(text="🔗 Ссылка на запись", url=settings.deep_link(event.id))
@@ -378,14 +371,14 @@ def admin_user_kb(user: User, *, page: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def confirm_cancel_event_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
+def confirm_delete_event_kb(event: Event, *, page: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🚫 Да, отменить мероприятие",
+        text="🗑 Да, удалить",
         callback_data=AdminCB(action="cancel_ok", id=event.id, page=page),
     )
     builder.button(
-        text="⬅️ Не отменять",
+        text="⬅️ Не удалять",
         callback_data=AdminCB(action="tour", id=event.id, page=page),
     )
     builder.adjust(1)
